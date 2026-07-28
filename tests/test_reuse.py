@@ -1,6 +1,6 @@
 """Rerun / reuse tests (SPEC §10.5, §18 ``test_reuse``).
 
-MockRuntime only -- no network, no real opencode. The engine-level cases drive
+MockRuntime only -- no network, no real CLI. The engine-level cases drive
 ``refract.scheduler.run_pipeline`` directly with ``reuse_run_dir`` (mirrors the
 harness in tests/test_map.py / tests/test_map_over.py); one case additionally
 exercises the CLI ``rerun_impl`` end to end on a copy of examples/demo-project.

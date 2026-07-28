@@ -1,27 +1,31 @@
 # ~/.refract/providers.yaml  (copy to your $REFRACT_HOME, default ~/.refract)
 #
 # Registry of the providers (and their models) that pipelines can assign to agents.
-# The key is the model-string prefix before "/". The API key itself never lives
-# here — only the NAME of the env var that holds it (I8). `library_path` points
-# refract at the agent/type library.
+# The key is the model-string prefix before "/". `library_path` points refract at the
+# agent/type library.
+#
+# This fork executes every step through the Claude Code CLI, which authenticates from
+# the subscription it is logged into — so a provider needs NO api_key_env at all, and
+# the engine considers it available when the CLI is on PATH. Log in once with `claude`
+# and nothing secret is stored here or anywhere else refract touches (I8).
+#
+# max_concurrent matters more than it would with an API key: a subscription is rate
+# limited per ACCOUNT, so parallel steps compete with each other. Two is a sane
+# default; raise it only if steps sit idle rather than get throttled.
 
 providers:
-  # Built-in opencode provider — needs only the key env.
-  openai:
-    api_key_env: OPENAI_API_KEY
-    max_concurrent: 4
-    models: [gpt-5.6]
+  claude:
+    max_concurrent: 2
+    # CLI aliases (always the latest model of that tier) or exact model ids
+    models: [sonnet, opus, haiku]
 
-  # OpenAI-compatible provider. Custom providers also need the ai-sdk `npm`
-  # package and `base_url`, plus an explicit `models` catalog. Pick base_url by
-  # your key type:
-  #   - Kimi For Coding plan (sk-kimi-… key): https://api.kimi.com/coding/v1
-  #   - Moonshot platform key (sk-… key):     https://api.moonshot.ai/v1
-  kimi:
-    api_key_env: MOONSHOT_API_KEY
-    max_concurrent: 4
-    npm: "@ai-sdk/openai-compatible"
-    base_url: "https://api.kimi.com/coding/v1"
-    models: [k3, k3-256k, kimi-for-coding, kimi-for-coding-highspeed]
+# An API key is still possible if you have one: declare api_key_env and the engine
+# checks that variable instead of the CLI. The CLI picks the key up from the
+# environment itself, so pipelines do not change.
+#
+#  anthropic-key:
+#    api_key_env: ANTHROPIC_API_KEY
+#    max_concurrent: 4
+#    models: [claude-opus-5, claude-sonnet-5]
 
-library_path: /absolute/path/to/refract/library
+library_path: /absolute/path/to/refract-claude/library

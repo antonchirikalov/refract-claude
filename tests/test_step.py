@@ -433,7 +433,7 @@ class TestInfraRetries:
     ) -> None:
         """An adapter may explain a retryable failure; "exhausted" alone misleads.
 
-        The opencode adapter routes a transient provider error (429, a limiter's 401)
+        The Claude Code adapter routes a transient provider error (a rate limit,
         through the infra retries WITH its summary attached, so a run that died on the
         provider does not read like an engine bug.
         """

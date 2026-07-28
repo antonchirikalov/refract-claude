@@ -9,6 +9,11 @@ __pycache__/
 # uv / venv
 .venv/
 
+# local sandbox for driving the CLI by hand: a REFRACT_HOME with providers/mcp and a
+# scratch project scaffolded from a template. Environment, not project content.
+.refract-home/
+claude-demo/
+
 # refract run outputs
 runs/
 illustrator-sample/

@@ -81,7 +81,8 @@ def test_init_defaults_name_to_dir(
     init_impl(proj, template="discovery", app=app)
     config = yaml.safe_load((proj / "project.yaml").read_text("utf-8"))
     assert config["name"] == "my-proj"
-    assert config["defaults"]["model"] == "openai/gpt-5.6"  # documented default
+    # this fork runs on the Claude Code CLI, so the scaffold default is a Claude model
+    assert config["defaults"]["model"] == "claude/sonnet"
 
 
 def test_init_unknown_template_is_usage_error(

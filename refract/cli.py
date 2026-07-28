@@ -7,7 +7,7 @@ Commands: ``validate``, ``run``, ``status``, ``resume`` (Phase 0) plus
 The command bodies are thin wrappers over pure ``*_impl`` functions that take an
 explicit :class:`AppConfig` and a ``runtime_factory``. Tests drive those
 directly with :class:`MockRuntime` and a fixed ``run_id``/clock — no network, no
-``~/.refract``, no real opencode (I7 / SPEC §18 ``test_cli``).
+``~/.refract``, no real CLI (I7 / SPEC §18 ``test_cli``).
 """
 
 from __future__ import annotations
@@ -76,12 +76,23 @@ class AppConfig:
 
     @property
     def available_providers(self) -> set[str]:
-        """A provider is available when its ``api_key_env`` var is non-empty (§7)."""
-        return {
-            name
-            for name, p in self.providers.providers.items()
-            if os.environ.get(p.api_key_env, "").strip()
-        }
+        """Which providers can actually run (SPEC §7, CHANGED in this fork).
+
+        A provider that declares ``api_key_env`` is available when that variable is
+        non-empty. A provider WITHOUT one is served by the Claude Code CLI, which
+        authenticates from its own subscription login — for those, availability means
+        the CLI is installed.
+        """
+        from refract.runtime.claude_code import cli_available
+
+        available: set[str] = set()
+        for name, p in self.providers.providers.items():
+            if p.api_key_env is None:
+                if cli_available():
+                    available.add(name)
+            elif os.environ.get(p.api_key_env, "").strip():
+                available.add(name)
+        return available
 
     @property
     def provider_limits(self) -> dict[str, int]:
@@ -371,15 +382,15 @@ def _new_run_id(now: datetime | None = None) -> str:
 
 
 def _default_runtime_factory(app: AppConfig, pipeline: Pipeline) -> AgentRuntime:
-    """Build the real opencode runtime from app config (SPEC §12).
+    """Build the Claude Code runtime from app config (SPEC §12).
 
-    Execution is not covered by the automated suite (no real opencode); tests
-    inject a MockRuntime via the ``runtime_factory`` parameter instead. See
-    ``docs/opencode-smoke.md``.
+    Execution is not covered by the automated suite (it needs the real CLI and a live
+    subscription); tests inject a MockRuntime via the ``runtime_factory`` parameter
+    instead, and the adapter's pure parts have their own tests.
     """
-    from refract.runtime.opencode import OpencodeRuntime
+    from refract.runtime.claude_code import ClaudeCodeRuntime
 
-    return OpencodeRuntime(providers=app.providers, mcp=app.mcp)
+    return ClaudeCodeRuntime(providers=app.providers, mcp=app.mcp)
 
 
 def _print_errors(errors: Sequence[object]) -> None:
@@ -984,7 +995,7 @@ def init_impl(
     template: str,
     app: AppConfig,
     name: str | None = None,
-    model: str = "openai/gpt-5.6",
+    model: str = "claude/sonnet",
     force: bool = False,
     input_dir: str | None = None,
 ) -> int:
@@ -1184,7 +1195,7 @@ def init(
     ),
     name: str | None = typer.Option(None, "--name", help="project name"),
     model: str = typer.Option(
-        "openai/gpt-5.6", "--model", help="default model (provider/model-id)"
+        "claude/sonnet", "--model", help="default model (provider/model-id)"
     ),
     force: bool = typer.Option(
         False, "--force", help="overwrite existing project.yaml"

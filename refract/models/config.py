@@ -36,20 +36,18 @@ class ProjectConfig(BaseModel):
 class ProviderConfig(BaseModel):
     """One provider entry (SPEC §7). Key = model prefix up to the first ``/``.
 
-    ``api_key_env``/``max_concurrent`` are all a built-in opencode provider
-    (e.g. ``openai``) needs. A custom / OpenAI-compatible provider (e.g. Kimi via
-    Moonshot) also needs ``npm`` (the ai-sdk package) and ``base_url``; ``models``
-    is the catalog of model-ids offered under this provider — required for
-    OpenAI-compatible providers to expose their models, and the menu agents pick
-    from when assigning ``model:`` per node.
+This fork runs on the Claude Code CLI, which authenticates from the subscription it
+    is logged into, so ``api_key_env`` is OPTIONAL: a provider without it is available
+    when the CLI is present. ``models`` is the catalog of model-ids (or CLI aliases such
+    as ``sonnet``/``opus``) offered under this provider — the menu a pipeline picks from
+    when assigning ``model:`` per node. ``max_concurrent`` matters more here than with a
+    key: a subscription is rate-limited per account, so keep it low.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    api_key_env: str
-    max_concurrent: int = 4
-    npm: str | None = None
-    base_url: str | None = None
+    api_key_env: str | None = None
+    max_concurrent: int = 2
     models: list[str] = Field(default_factory=list)
 
 

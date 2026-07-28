@@ -5,7 +5,7 @@ fnmatch pattern over ``step_id``. Consecutive calls to the same step consume
 successive list elements (a single-element list is reused for every call, which
 covers gate retries that should keep failing/succeeding the same way). Writes a
 stub ``raw.txt`` and a minimal ``agent.events.jsonl`` per attempt (I9). No
-network, no API keys, no real opencode.
+network, no API keys, no real CLI.
 """
 
 from __future__ import annotations

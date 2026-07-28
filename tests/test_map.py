@@ -5,7 +5,7 @@ A tiny ``builtin/seed`` node (registered only for this module, via monkeypatch)
 stands in for a real producer: it writes a ``collection<source@v1>`` manifest
 with exactly the items/payloads/statuses the test wants, including pre-seeded
 ``failed`` input items — something a real scanner can't do portably. No
-network, no real opencode: agent behavior is scripted via MockRuntime.
+network, no real CLI: agent behavior is scripted via MockRuntime.
 """
 
 from __future__ import annotations

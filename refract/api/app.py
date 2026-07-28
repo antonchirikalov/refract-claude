@@ -240,7 +240,9 @@ class PipelineGraph(BaseModel):
 
 class ProviderInfo(BaseModel):
     name: str
-    api_key_env: str
+    # None for a provider served by the Claude Code CLI: it authenticates from its own
+    # subscription login, so there is no key variable to name
+    api_key_env: str | None = None
     available: bool
     max_concurrent: int
     # model-ids offered under this provider (SPEC §7); the UI needs them to build a
@@ -285,7 +287,7 @@ def create_app(
     """Build the refract REST/WS API app (SPEC §15).
 
     ``projects_root`` holds one directory per project (each with a
-    ``project.yaml``). ``runtime_factory`` defaults to the real opencode
+    ``project.yaml``). ``runtime_factory`` defaults to the real Claude Code
     runtime; tests inject a MockRuntime factory. ``static_dir`` (the built SPA)
     is served at the root when given, so one process serves API and UI.
     """

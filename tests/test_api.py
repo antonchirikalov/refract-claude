@@ -1,7 +1,7 @@
 """Tests for the Phase 2 REST/WS API (SPEC §15).
 
 All tests use ``fastapi.testclient.TestClient`` + a MockRuntime factory — no
-network, no real opencode. A temp ``projects_root`` holds a copy of
+network, no real CLI. A temp ``projects_root`` holds a copy of
 ``examples/demo-project``; ``AppConfig`` points at the repo ``library`` and a
 single ``kimi`` provider (matching the demo project's default model
 ``kimi/kimi-k3`` and how ``test_cli`` builds AppConfig). The MockRuntime writes

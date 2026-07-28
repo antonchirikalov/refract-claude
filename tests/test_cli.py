@@ -1,7 +1,7 @@
 """Tests for the CLI impl functions (SPEC §14) + a Phase-0 end-to-end golden test.
 
 All tests use MockRuntime only -- no network, no ``~/.refract``, no real
-opencode. ``AppConfig`` is built in-process; the demo project is copied into
+the CLI. ``AppConfig`` is built in-process; the demo project is copied into
 ``tmp_path`` before each run so we never write into the real
 ``examples/demo-project``.
 """
@@ -67,8 +67,8 @@ def _app(
 
 
 def _copy_demo_project(tmp_path: Path) -> Path:
-    # runs/ is skipped: a developer's real run in examples/ (live opencode,
-    # .opencode/node_modules, files still open) otherwise breaks the copy.
+    # runs/ is skipped: a developer's real run in examples/ (live CLI,
+    # node_modules, files still open) otherwise breaks the copy.
     dest = tmp_path / "demo-project"
     shutil.copytree(DEMO_PROJECT, dest, ignore=shutil.ignore_patterns("runs"))
     return dest

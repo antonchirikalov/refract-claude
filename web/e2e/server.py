@@ -2,7 +2,7 @@
 
 Playwright boots this (see playwright.config.ts). It is the real engine and the real
 API — only the AgentRuntime is scripted, the same way the python suite injects
-MockRuntime (SPEC §18): no network, no provider quota, no opencode.
+MockRuntime (SPEC §18): no network, no provider quota, no CLI.
 
 Each start gets a fresh workspace under a temp dir, so a spec's assertions never
 depend on what a previous run left behind.
@@ -210,7 +210,7 @@ def _seed_chain_project(workspace: Path) -> None:
     shutil.copytree(
         REPO / "examples" / "extract-project",
         project,
-        ignore=shutil.ignore_patterns("runs", ".opencode", "node_modules", "pipelines"),
+        ignore=shutil.ignore_patterns("runs", "node_modules", "pipelines"),
     )
     (project / "pipelines").mkdir(exist_ok=True)
     (project / "pipelines" / "chain.yaml").write_text(CHAIN_PIPELINE, encoding="utf-8")
@@ -235,7 +235,7 @@ def build() -> tuple[object, Path]:
     shutil.copytree(
         REPO / "examples" / "extract-project",
         workspace / "extract-project",
-        ignore=shutil.ignore_patterns("runs", ".opencode", "node_modules"),
+        ignore=shutil.ignore_patterns("runs", "node_modules"),
     )
     _seed_confirm_project(workspace)
     _seed_chain_project(workspace)

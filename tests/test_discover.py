@@ -2,7 +2,7 @@
 
 The agent produces ONE directory artifact; the engine turns it into
 ``collection<source@v1>``, which is what keeps I6 intact. MockRuntime stands in for
-the searching agent — no network, no real opencode.
+the searching agent — no network, no real CLI.
 """
 
 from __future__ import annotations
