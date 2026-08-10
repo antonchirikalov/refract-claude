@@ -257,34 +257,49 @@ class Ledger:
     def get_step(self, step_id: str) -> StepState | None:
         return self.state.steps.get(step_id)
 
-    def has_failed_nodes(self) -> bool:
-        return any(n.status is NodeStatus.failed for n in self.state.nodes.values())
-
-    def steps_for_node(self, node_id: str) -> dict[str, StepState]:
-        return {sid: s for sid, s in self.state.steps.items() if s.node == node_id}
-
     def total_usage(self) -> Usage:
-        """What this run has paid so far (SPEC §9).
-
-        DERIVED from the step records rather than stored as a running total: a step
-        re-executed by ``resume``/``rerun`` reports its own total, and a stored sum
-        would have to be reconciled against that on every path. Reused steps carry no
-        usage — their money was spent in the run they were reused from.
-        """
-        total = Usage()
-        for step in self.state.steps.values():
-            if step.usage is not None:
-                total = total.plus(step.usage)
-        return total
+        """What this run has paid so far (SPEC §9)."""
+        return total_usage(self.state)
 
     def usage_by_node(self) -> dict[str, Usage]:
         """Per-node cost roll-up; nodes that paid nothing are absent."""
-        by_node: dict[str, Usage] = {}
-        for step in self.state.steps.values():
-            if step.usage is None:
-                continue
-            by_node[step.node] = by_node.get(step.node, Usage()).plus(step.usage)
-        return by_node
+        return usage_by_node(self.state)
+
+    def node_ids(self) -> list[str]:
+        return list(self.state.nodes)
+
+
+# --- usage roll-ups (SPEC §9) ------------------------------------------------
+#
+# Free functions over ``RunState``, not only methods: the ledger is the writer's view
+# and exists only inside a running engine, while a post-mortem (``refract explain``)
+# reads a finished ``state.json`` from disk. Both need the same arithmetic, and it must
+# not be written twice — a run's cost would then depend on who added it up.
+
+
+def total_usage(state: RunState) -> Usage:
+    """What a run has paid.
+
+    DERIVED from the step records rather than stored as a running total: a step
+    re-executed by ``resume``/``rerun`` reports its own total, and a stored sum would
+    have to be reconciled against that on every path. Reused steps carry no usage —
+    their money was spent in the run they were reused from.
+    """
+    total = Usage()
+    for step in state.steps.values():
+        if step.usage is not None:
+            total = total.plus(step.usage)
+    return total
+
+
+def usage_by_node(state: RunState) -> dict[str, Usage]:
+    """Per-node cost roll-up; nodes that paid nothing are absent."""
+    by_node: dict[str, Usage] = {}
+    for step in state.steps.values():
+        if step.usage is None:
+            continue
+        by_node[step.node] = by_node.get(step.node, Usage()).plus(step.usage)
+    return by_node
 
     def node_ids(self) -> list[str]:
         return list(self.state.nodes)

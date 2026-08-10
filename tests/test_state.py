@@ -126,20 +126,6 @@ def test_set_step_insert_then_update(tmp_path: Path) -> None:
     assert len(ledger.state.steps) == 1
 
 
-def test_steps_for_node_filters(tmp_path: Path) -> None:
-    ledger = _make_ledger(tmp_path)
-    ledger.set_step("a#1", node="a", status=StepStatus.done, tries=1)
-    ledger.set_step("a#2", node="a", status=StepStatus.failed, tries=2)
-    ledger.set_step("b#1", node="b", status=StepStatus.done, tries=1)
-
-    a_steps = ledger.steps_for_node("a")
-    assert set(a_steps) == {"a#1", "a#2"}
-    assert all(s.node == "a" for s in a_steps.values())
-
-    b_steps = ledger.steps_for_node("b")
-    assert set(b_steps) == {"b#1"}
-
-
 def test_set_node_selection_records_winner(tmp_path: Path) -> None:
     """SPEC §10.3: select node exports winner/winner_model onto the node record."""
     ledger = _make_ledger(tmp_path)
@@ -187,14 +173,6 @@ def test_reset_failed_steps_empty_when_none_failed(tmp_path: Path) -> None:
     ledger.set_step("a#1", node="a", status=StepStatus.done, tries=1)
 
     assert ledger.reset_failed_steps() == []
-
-
-def test_has_failed_nodes(tmp_path: Path) -> None:
-    ledger = _make_ledger(tmp_path)
-    assert ledger.has_failed_nodes() is False
-
-    ledger.set_node_status("a", NodeStatus.failed, error="oops")
-    assert ledger.has_failed_nodes() is True
 
 
 def test_enum_values_serialize_as_strings(tmp_path: Path) -> None:

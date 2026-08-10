@@ -457,9 +457,6 @@ class ArtifactRegistry:
         inner, _ = parse_type_ref(ref)
         return inner in self._types
 
-    def is_reserved(self, name: str) -> bool:
-        return name in CONTROL_TYPES
-
     def is_control_type(self, name: str) -> bool:
         return name in CONTROL_TYPES
 

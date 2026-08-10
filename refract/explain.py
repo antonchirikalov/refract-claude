@@ -25,7 +25,7 @@ from refract.models.ledger import (
     StepStatus,
     Usage,
 )
-from refract.state import STATE_FILENAME, step_workdir
+from refract.state import STATE_FILENAME, step_workdir, total_usage, usage_by_node
 
 # A gate that passed within this fraction of its floor is reported: clearing a 20 000
 # character minimum at 20 100 is a different artifact from clearing it at 80 000, and
@@ -132,15 +132,15 @@ def diagnose(run_dir: Path | str) -> Diagnosis:
         step_counts[step.status.value] = step_counts.get(step.status.value, 0) + 1
 
     per_call = _usage_events_by_step(events)
-    total = Usage()
+    # the roll-ups come from state.py: one implementation of a run's cost, whether the
+    # asker is the engine holding a ledger or a post-mortem reading state.json
+    total = total_usage(state)
+    by_node = usage_by_node(state)
     wasted = Usage()
-    by_node: dict[str, Usage] = {}
     spend: list[StepSpend] = []
     for step_id, step in state.steps.items():
         if step.usage is None:
             continue
-        total = total.plus(step.usage)
-        by_node[step.node] = by_node.get(step.node, Usage()).plus(step.usage)
         step_wasted = _wasted(step.status, step.usage, per_call.get(step_id, []))
         wasted = wasted.plus(step_wasted)
         spend.append(

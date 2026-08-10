@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import stat
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -61,20 +60,6 @@ def link_or_copy(src: Path | str, dst: Path | str) -> None:
         shutil.copytree(long_path(src), long_path(dst))
     else:
         shutil.copy2(long_path(src), long_path(dst))
-
-
-def make_tree_readonly(path: Path | str) -> None:
-    """Best-effort: mark a materialized input tree read-only (SPEC §10.1)."""
-    path = Path(path)
-    targets = [path, *path.rglob("*")] if path.is_dir() else [path]
-    for target in targets:
-        try:
-            if target.is_symlink():
-                continue
-            mode = target.stat().st_mode
-            target.chmod(mode & ~stat.S_IWRITE)
-        except OSError:
-            pass  # best-effort only
 
 
 # --- artifact naming (SPEC §10.4) ------------------------------------------
