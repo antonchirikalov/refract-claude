@@ -219,9 +219,8 @@ def env_placeholders(value: str) -> str:
     """``{env:VAR}`` → ``${VAR}``: refract's placeholder in the runtime's dialect.
 
     ``mcp.yaml`` is refract's own format (SPEC §7) and writes secrets as ``{env:VAR}``
-    so no value is ever inlined (I8). opencode understood that spelling; the Claude
-    Code CLI expects ``${VAR}``, and an untranslated placeholder is not an error — it
-    is passed through as a literal. A live ``find`` step spent its whole run with
+    so no value is ever inlined (I8). The CLI expects its own spelling, ``${VAR}``, and
+    an untranslated placeholder is not an error — it is passed through as a literal. A live ``find`` step spent its whole run with
     ``{env:TAVILY_API_KEY}`` as its API key, got "Invalid Tavily API key" on every
     call, and fell back to plain web search without anything in the run saying why.
     """

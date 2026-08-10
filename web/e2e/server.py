@@ -168,7 +168,7 @@ def _seed_confirm_project(workspace: Path) -> None:
         "name: needs-approval\n"
         "input: ./input\n"
         "defaults:\n"
-        "  model: kimi/k3\n"
+        "  model: claude/sonnet\n"
         "confirm: [webfetch]\n",
         encoding="utf-8",
     )
@@ -219,7 +219,7 @@ def _seed_chain_project(workspace: Path) -> None:
         "name: chain-project\n"
         "input: ./input\n"
         "defaults:\n"
-        "  model: kimi/k3\n",
+        "  model: claude/sonnet\n",
         encoding="utf-8",
     )
 
@@ -229,8 +229,7 @@ def build() -> tuple[object, Path]:
     workspace = home / "projects"
     workspace.mkdir(parents=True)
     os.environ["REFRACT_HOME"] = str(home)
-    os.environ.setdefault("MOONSHOT_API_KEY", "e2e")
-    os.environ.setdefault("OPENAI_API_KEY", "e2e")
+    os.environ.setdefault("ANTHROPIC_API_KEY", "e2e")
     # a project with documents already in place, for specs that only need to run one
     shutil.copytree(
         REPO / "examples" / "extract-project",
@@ -244,8 +243,10 @@ def build() -> tuple[object, Path]:
         providers=ProvidersFile.model_validate(
             {
                 "providers": {
-                    "kimi": {"api_key_env": "MOONSHOT_API_KEY", "models": ["k3"]},
-                    "openai": {"api_key_env": "OPENAI_API_KEY", "models": ["gpt-5.6"]},
+                    "claude": {
+                        "api_key_env": "ANTHROPIC_API_KEY",
+                        "models": ["sonnet", "opus"],
+                    },
                 }
             }
         ),

@@ -766,7 +766,6 @@ name = "refract"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "httpx" },
     { name = "jinja2" },
     { name = "jsonschema" },
     { name = "pydantic" },
@@ -781,6 +780,7 @@ api = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 dev = [
+    { name = "httpx" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -792,7 +792,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.111" },
-    { name = "httpx", specifier = ">=0.27" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "jsonschema", specifier = ">=4.18" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },

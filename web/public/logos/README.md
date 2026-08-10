@@ -1,7 +1,7 @@
 # Provider logos (optional)
 
 Drop an official SVG here as `<provider>.svg` — the provider key is the part before
-`/` in a model string (`openai/gpt-5.6` → `openai.svg`). The UI picks it up
+`/` in a model string (`claude/sonnet` → `claude.svg`). The UI picks it up
 automatically and falls back to a tinted monogram when the file is absent.
 
 Nothing is bundled on purpose: these are trademarks, and an imitation drawn from

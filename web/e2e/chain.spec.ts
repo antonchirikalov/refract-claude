@@ -32,19 +32,19 @@ test('the inspector edits one chain element, not the whole body', async ({ page 
   await expect(panel.locator('.inspector-kind')).toHaveText('loop · body2')
   await expect(panel).toContainText('Body step 2')
 
-  await panel.locator('select').selectOption('openai/gpt-5.6')
+  await panel.locator('select').selectOption('claude/opus')
   await expect(
     element(page, 'requirements_fact_checker').locator('.model-name'),
-  ).toHaveText('gpt-5.6')
+  ).toHaveText('opus')
 
   // it was written to the pipeline file, and ONLY for this element
   await page.reload()
   await expect(
     element(page, 'requirements_fact_checker').locator('.model-name'),
-  ).toHaveText('gpt-5.6')
+  ).toHaveText('opus')
   await expect(
     element(page, 'requirements_writer').locator('.model-name'),
-  ).not.toHaveText('gpt-5.6')
+  ).not.toHaveText('opus')
   expect(problems).toEqual([])
 })
 

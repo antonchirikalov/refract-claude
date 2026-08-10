@@ -955,7 +955,9 @@ def create_app(
 
     @api.post("/api/runs/{run_id}/pause")
     def pause_run(run_id: str) -> None:
-        raise HTTPException(status_code=501, detail="pause not implemented (phase 3)")
+        # declared by the §15 contract, never implemented: nothing in the engine can
+        # suspend a step mid-flight, and the UI offers resume only for failed/paused runs
+        raise HTTPException(status_code=501, detail="pause is not implemented")
 
     @api.post("/api/runs/{run_id}/resume")
     async def resume_run(run_id: str) -> dict[str, str]:

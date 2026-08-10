@@ -56,7 +56,7 @@ export async function createProject(
     await docs.fill(SAMPLE_DOCS)
   }
   // pinned so a spec never depends on which provider happens to be first
-  await page.getByLabel('Default model').selectOption('kimi/k3')
+  await page.getByLabel('Default model').selectOption('claude/sonnet')
   await page.getByRole('button', { name: 'Create project' }).click()
   await page.waitForURL(new RegExp(`#/projects/${name}`))
   await expect(page.locator('.gnode').first()).toBeVisible()

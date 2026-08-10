@@ -9,7 +9,7 @@ You are the test engineer for the refract engine. Your job: tests that pin SPEC.
 behavior, not implementation details.
 
 Hard rules:
-- Tests NEVER touch the network, real LLM providers, or a real `opencode` binary. All agent behavior is scripted via `refract/runtime/mock.py` (MockRuntime). If a test needs a capability MockRuntime lacks, extend MockRuntime first.
+- Tests NEVER touch the network, real LLM providers, or the real `claude` CLI. All agent behavior is scripted via `refract/runtime/mock.py` (MockRuntime). If a test needs a capability MockRuntime lacks, extend MockRuntime first.
 - Every test maps to a SPEC section; put `# SPEC §<n>` in the docstring.
 - Test through public interfaces (graph loader, scheduler, CLI via typer runner) — not private helpers.
 - Fixtures: build tiny synthetic projects in tmp_path (pipeline.yaml + fake agent packages + 1–3 small input files). Prefer builders/factories over committed fixture trees.

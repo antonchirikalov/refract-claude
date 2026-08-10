@@ -8,8 +8,9 @@
 import { useState } from 'react'
 
 const TINTS: Record<string, string> = {
-  openai: '#0f9d76',
+  claude: '#c96442',
   anthropic: '#c96442',
+  openai: '#0f9d76',
   kimi: '#6f5bd4',
   moonshot: '#6f5bd4',
   google: '#3b7ddd',

@@ -7,7 +7,6 @@ dependencies = [
   "pydantic>=2.7",
   "pyyaml>=6",
   "jsonschema>=4.18",
-  "httpx>=0.27",
   "typer>=0.12",
   "jinja2>=3.1",
   "ruamel-yaml>=0.18",
@@ -18,6 +17,7 @@ api = ["fastapi>=0.111", "uvicorn[standard]>=0.30"]   # phase 2 ([standard] → 
 dev = [
   "pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5", "mypy>=1.10",
   "types-PyYAML>=6", "types-jsonschema>=4",
+  "httpx>=0.27",          # fastapi.testclient needs it; the engine itself does not
 ]
 
 [project.scripts]

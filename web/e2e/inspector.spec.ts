@@ -21,7 +21,7 @@ test('a container shows its own properties and an element shows its model', asyn
   await element(page, 'requirements_critic').click()
   await expect(panel.locator('.inspector-kind')).toHaveText('loop · critic')
   await expect(panel.getByRole('heading')).toHaveText('requirements_critic')
-  await expect(panel.locator('select')).toHaveValue('kimi/k3')
+  await expect(panel.locator('select')).toHaveValue('claude/sonnet')
   expect(problems).toEqual([])
 })
 
@@ -33,15 +33,15 @@ test('changing an element model is written and reflected in the graph', async ({
 
   await node(page, 'refine').click()
   await element(page, 'requirements_critic').click()
-  await page.locator('.inspector select').selectOption('openai/gpt-5.6')
+  await page.locator('.inspector select').selectOption('claude/opus')
 
   const criticCard = element(page, 'requirements_critic')
-  await expect(criticCard.locator('.model-name')).toHaveText('gpt-5.6')
+  await expect(criticCard.locator('.model-name')).toHaveText('opus')
   // and it survives a reload, i.e. it was written to the pipeline file
   await page.reload()
   await expect(
     element(page, 'requirements_critic').locator('.model-name'),
-  ).toHaveText('gpt-5.6')
+  ).toHaveText('opus')
   expect(problems).toEqual([])
 })
 
@@ -84,5 +84,5 @@ test('an edit that would break the pipeline is refused with a reason', async ({
   // the graph still shows the old model
   await expect(
     node(page, 'extract').locator('.model-name'),
-  ).toHaveText('k3')
+  ).toHaveText('sonnet')
 })

@@ -53,7 +53,7 @@ violations (see below).
 - `refract/scheduler.py` — asyncio; a node is ready when all its input sources are done/reused.
 - `refract/steps.py` — the ONE step lifecycle (SPEC §10). Meta-nodes and map reuse it; do not duplicate it.
 - `refract/metanodes.py` — loop/select semantics (SPEC §10).
-- `refract/runtime/` — `AgentRuntime` protocol; `claude_code.py` (real: the Claude Code CLI on a subscription), `workdir_guard.py` (the `PreToolUse` hook that makes I1 mechanical), `mock.py` (tests). No opencode in this fork.
+- `refract/runtime/` — `AgentRuntime` protocol; `claude_code.py` (real: the Claude Code CLI on a subscription), `workdir_guard.py` (the `PreToolUse` hook that makes I1 mechanical), `mock.py` (tests).
 - `refract/state.py` — ledger; `refract/events.py` — events.jsonl.
 - `library/` — agent packages, artifact type registry, pipeline templates (data, not code).
 
