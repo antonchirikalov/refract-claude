@@ -1,10 +1,11 @@
 # ~/.refract/mcp.yaml  (copy to your $REFRACT_HOME, default ~/.refract)
 #
 # Every MCP server an agent references via `needs: mcp:<name>` must be declared
-# here — refract compiles the matching servers into each step's opencode.json.
-# Secrets go through {env:VAR} placeholders (resolved by opencode from the run
-# env), never as literals (I8). opencode launches each MCP subprocess with ONLY
-# this declared `env`, so pass any key the server needs explicitly.
+# here — refract compiles the matching servers into each step's `.mcp.json`.
+# Secrets go through {env:VAR} placeholders, never as literals (I8); the adapter
+# rewrites them into the CLI's own ${VAR} spelling and the value is resolved from
+# the run env. The CLI launches each MCP subprocess with ONLY this declared `env`,
+# so pass any key the server needs explicitly.
 #
 # The shipped library needs exactly three servers:
 #   tavily-remote  -> requirements_writer, solution_designer, arch_probe (web research)
@@ -12,8 +13,8 @@
 #   paperbanana    -> illustrator (image generation)
 
 servers:
-  # Web research (Tavily). Use YOUR launch command — the same one already in your
-  # opencode config. If it's a remote HTTP server use `url:`/`token_env:` instead.
+  # Web research (Tavily). Use YOUR launch command. If it's a remote HTTP server
+  # use `url:`/`token_env:` instead.
   tavily-remote:
     command: ["npx", "-y", "tavily-mcp"]         # <-- replace with your actual command
     env:

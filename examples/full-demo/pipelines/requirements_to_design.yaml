@@ -36,7 +36,7 @@ nodes:
     type: agent
     agent: solution_designer@1
     inputs: { requirements: refine.doc }
-    map_over: { models: ["kimi/k3", "kimi/kimi-for-coding"] }
+    map_over: { models: ["claude/sonnet", "claude/opus"] }
     params: { workers: 2 }
 
   - id: choose

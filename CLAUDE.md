@@ -53,7 +53,7 @@ violations (see below).
 - `refract/scheduler.py` — asyncio; a node is ready when all its input sources are done/reused.
 - `refract/steps.py` — the ONE step lifecycle (SPEC §10). Meta-nodes and map reuse it; do not duplicate it.
 - `refract/metanodes.py` — loop/select semantics (SPEC §10).
-- `refract/runtime/` — `AgentRuntime` protocol; `opencode.py` (real), `mock.py` (tests).
+- `refract/runtime/` — `AgentRuntime` protocol; `claude_code.py` (real: the Claude Code CLI on a subscription), `workdir_guard.py` (the `PreToolUse` hook that makes I1 mechanical), `mock.py` (tests). No opencode in this fork.
 - `refract/state.py` — ledger; `refract/events.py` — events.jsonl.
 - `library/` — agent packages, artifact type registry, pipeline templates (data, not code).
 
@@ -72,7 +72,7 @@ violations (see below).
 
 ## Workflow rules
 
-- Tests first for engine logic; every feature lands with tests from SPEC §18. Tests use MockRuntime only — no network, no API keys, no real opencode.
+- Tests first for engine logic; every feature lands with tests from SPEC §18. Tests use MockRuntime only — no network, no API keys, no real `claude` CLI.
 - Windows matters: UTF-8 everywhere explicitly, `pathlib` only, no POSIX-only calls (symlink must have copy fallback).
 - Keep `docs/PROGRESS.md` updated: current phase, done/remaining SPEC sections.
 - Any deliberate deviation from SPEC.md: update `docs/spec/SPEC.md` in the same change, mark
@@ -82,7 +82,8 @@ violations (see below).
 
 ## Gotchas
 
-- Opencode processes started by the adapter must be killed in `close()` even on crash paths (try/finally). How the adapter confines file access to the step workdir (I1) is its own concern — see SPEC §12.
+- CLI processes started by the adapter must be killed in `close()` even on crash paths (try/finally).
+- I1 is enforced by a generated `PreToolUse` hook, not by `cwd`: `cwd` constrains relative paths only, and a live step wrote its whole result to an absolute path outside the workdir. The hook currently matches `Write|Edit|MultiEdit|NotebookEdit` — `Bash`/`PowerShell` go around it (SPEC §12).
 - Step retry counters: `gate_retries` and `infra_retries` are independent — don't merge them.
 - Re-execution of a step NEVER overwrites in place: archive to `attempts/<n>/` first (SPEC §10.2).
 - Loop round number is DERIVED from the ledger, never stored separately.

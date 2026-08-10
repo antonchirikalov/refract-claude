@@ -439,7 +439,7 @@ class TestRerunImplEndToEnd:
         from refract.cli import AppConfig, run_impl, rerun_impl
         from refract.models.config import ProvidersFile
 
-        monkeypatch.setenv("MOONSHOT_API_KEY", "sk-test")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
         library_path = REPO_ROOT / "library"
         demo_project = REPO_ROOT / "examples" / "demo-project"
         project = tmp_path / "demo-project"
@@ -448,7 +448,7 @@ class TestRerunImplEndToEnd:
         providers = ProvidersFile.model_validate(
             {
                 "providers": {
-                    "kimi": {"api_key_env": "MOONSHOT_API_KEY", "max_concurrent": 4}
+                    "claude": {"api_key_env": "ANTHROPIC_API_KEY", "max_concurrent": 4}
                 }
             }
         )

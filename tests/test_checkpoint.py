@@ -44,9 +44,9 @@ def _clock_seq() -> "callable":
 
 
 def _app(monkeypatch: pytest.MonkeyPatch) -> AppConfig:
-    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-test")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     providers = ProvidersFile.model_validate(
-        {"providers": {"kimi": {"api_key_env": "MOONSHOT_API_KEY"}}}
+        {"providers": {"claude": {"api_key_env": "ANTHROPIC_API_KEY"}}}
     )
     return AppConfig(library_path=LIBRARY_PATH, providers=providers)
 

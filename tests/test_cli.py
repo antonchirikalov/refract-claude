@@ -55,11 +55,11 @@ def _app(
     *, with_key: bool = True, monkeypatch: pytest.MonkeyPatch | None = None
 ) -> AppConfig:
     if monkeypatch is not None and with_key:
-        monkeypatch.setenv("MOONSHOT_API_KEY", "sk-test")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     providers = ProvidersFile.model_validate(
         {
             "providers": {
-                "kimi": {"api_key_env": "MOONSHOT_API_KEY", "max_concurrent": 4}
+                "claude": {"api_key_env": "ANTHROPIC_API_KEY", "max_concurrent": 4}
             }
         }
     )
@@ -111,7 +111,7 @@ class TestValidateInvalid:
     ) -> None:
         # SPEC §14/§8.3: E_PROVIDER_UNAVAILABLE is blocking when the provider's
         # api_key_env is unset.
-        monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         project = _copy_demo_project(tmp_path)
         app = _app(with_key=False)
         code = validate_impl(project, app=app)

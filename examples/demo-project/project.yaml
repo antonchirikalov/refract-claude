@@ -2,4 +2,4 @@ version: "0.1"
 name: "Demo Project"
 input: ./input
 defaults:
-  model: kimi/kimi-k3
+  model: claude/sonnet

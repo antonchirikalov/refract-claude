@@ -13,6 +13,11 @@ __pycache__/
 # scratch project scaffolded from a template. Environment, not project content.
 .refract-home/
 claude-demo/
+# live-run sandboxes: the projects the engine was validated on (brief + pipeline + the
+# artifacts those runs produced). Same category as claude-demo/ — a workbench, not the
+# product. terror-report/evidence/ keeps the expensive artifacts of six deleted runs.
+tavily-smoke/
+terror-report/
 
 # refract run outputs
 runs/

@@ -3,8 +3,8 @@
 All tests use ``fastapi.testclient.TestClient`` + a MockRuntime factory — no
 network, no real CLI. A temp ``projects_root`` holds a copy of
 ``examples/demo-project``; ``AppConfig`` points at the repo ``library`` and a
-single ``kimi`` provider (matching the demo project's default model
-``kimi/kimi-k3`` and how ``test_cli`` builds AppConfig). The MockRuntime writes
+single ``claude`` provider (matching the demo project's default model
+``claude/sonnet`` and how ``test_cli`` builds AppConfig). The MockRuntime writes
 a valid ``requirements.md`` for ``write:*`` so the run completes fast and
 deterministically.
 """
@@ -50,7 +50,7 @@ def _app_config() -> AppConfig:
     providers = ProvidersFile.model_validate(
         {
             "providers": {
-                "kimi": {"api_key_env": "MOONSHOT_API_KEY", "max_concurrent": 4}
+                "claude": {"api_key_env": "ANTHROPIC_API_KEY", "max_concurrent": 4}
             }
         }
     )
@@ -63,7 +63,7 @@ def _mock_factory(app: AppConfig, pipeline: Pipeline) -> MockRuntime:
 
 @pytest.fixture()
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-test")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     # keep the user's real ~/.refract out of it: user templates are written there
     monkeypatch.setenv("REFRACT_HOME", str(tmp_path / "refract-home"))
     projects_root = tmp_path / "projects"
@@ -216,12 +216,12 @@ def test_put_pipeline_and_models(client: TestClient) -> None:
     resp = client.get("/api/models")
     assert resp.status_code == 200
     names = {p["name"] for p in resp.json()}
-    assert "kimi" in names
-    kimi = next(p for p in resp.json() if p["name"] == "kimi")
-    assert kimi["available"] is True
+    assert "claude" in names
+    claude = next(p for p in resp.json() if p["name"] == "claude")
+    assert claude["available"] is True
     # never echo secret values, only the env var name
-    assert kimi["api_key_env"] == "MOONSHOT_API_KEY"
-    assert "models" in kimi  # the UI builds "provider/model-id" from these
+    assert claude["api_key_env"] == "ANTHROPIC_API_KEY"
+    assert "models" in claude  # the UI builds "provider/model-id" from these
 
 
 # --- pipeline write: verify, then commit (SPEC §19.2/§19.3) -------------------
@@ -355,7 +355,7 @@ def test_create_project_from_template_with_external_input(
             "name": "atlas",
             "template": "extract",
             "input": str(docs),
-            "model": "kimi/kimi-k3",
+            "model": "claude/sonnet",
         },
     )
 
@@ -365,7 +365,7 @@ def test_create_project_from_template_with_external_input(
     )
     # the documents folder is referenced as given, never copied (SPEC-UI §2)
     assert config["input"] == str(docs)
-    assert config["defaults"]["model"] == "kimi/kimi-k3"
+    assert config["defaults"]["model"] == "claude/sonnet"
     assert not (tmp_path / "projects" / "atlas" / "input").exists()
     assert client.get("/api/projects/atlas/pipelines").json() == ["extract"]
 
@@ -469,7 +469,7 @@ def test_serve_builds_the_api_over_the_workspace(
     # injected so no socket is opened here.
     from refract.cli import serve_impl, workspace_dir
 
-    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-test")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     monkeypatch.setenv("REFRACT_HOME", str(tmp_path / "home"))
     workspace = workspace_dir()
     shutil.copytree(
@@ -721,7 +721,7 @@ def test_graph_nodes_carry_effective_models_and_checkpoints(
     graph = client.get("/api/projects/demo-project/pipelines/demo/graph").json()
     nodes = {n["id"]: n for n in graph["nodes"]}
 
-    assert nodes["write"]["models"] == ["kimi/kimi-k3"]  # from project defaults
+    assert nodes["write"]["models"] == ["claude/sonnet"]  # from project defaults
     assert nodes["scan"]["models"] == []  # a builtin runs no model
     assert nodes["scan"]["checkpoint"] is True
     assert nodes["write"]["checkpoint"] is False
@@ -740,7 +740,7 @@ def test_graph_exposes_meta_node_internals(client: TestClient, tmp_path: Path) -
                 "version": "0.1",
                 "name": "sd",
                 "input": "./input",
-                "defaults": {"model": "kimi/kimi-k3"},
+                "defaults": {"model": "claude/sonnet"},
             }
         ),
         encoding="utf-8",
@@ -756,7 +756,7 @@ def test_graph_exposes_meta_node_internals(client: TestClient, tmp_path: Path) -
     refine = nodes["refine"]
     assert [b["role"] for b in refine["blocks"]] == ["body", "critic"]
     assert refine["blocks"][0]["agent"] == "requirements_writer@1"
-    assert refine["blocks"][0]["model"] == "kimi/kimi-k3"  # inherited default
+    assert refine["blocks"][0]["model"] == "claude/sonnet"  # inherited default
     assert refine["facts"]["rounds"] == "≤3"
 
     choose = nodes["choose"]
@@ -778,14 +778,14 @@ def test_patch_node_sets_a_model_and_keeps_the_file_valid(client: TestClient) ->
 
     resp = client.patch(
         f"/api/projects/demo-project/pipelines/demo/nodes/write?base_hash={before['hash']}",
-        json={"model": "kimi/kimi-k3"},
+        json={"model": "claude/sonnet"},
     )
 
     assert resp.status_code == 200
     assert resp.json()["committed"] is True
     graph = client.get("/api/projects/demo-project/pipelines/demo/graph").json()
     write = next(n for n in graph["nodes"] if n["id"] == "write")
-    assert write["models"] == ["kimi/kimi-k3"]
+    assert write["models"] == ["claude/sonnet"]
     # the response's hash is what the client should send next
     after = client.get("/api/projects/demo-project/pipelines/demo").json()
     assert after["hash"] == resp.json()["hash"]
@@ -810,7 +810,7 @@ def test_patch_node_rejects_unknown_node_and_bad_params(client: TestClient) -> N
     assert (
         client.patch(
             "/api/projects/demo-project/pipelines/demo/nodes/nope",
-            json={"model": "kimi/kimi-k3"},
+            json={"model": "claude/sonnet"},
         ).status_code
         == 404
     )
@@ -832,7 +832,7 @@ def test_patch_node_refuses_while_a_run_is_active(
 
     resp = client.patch(
         "/api/projects/demo-project/pipelines/demo/nodes/write",
-        json={"model": "kimi/kimi-k3"},
+        json={"model": "claude/sonnet"},
     )
 
     assert resp.status_code == 409
