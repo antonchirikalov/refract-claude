@@ -714,3 +714,166 @@ def test_retrying_a_step_rebuilds_its_inputs(tmp_path: Path) -> None:
     (input_root / "leftover" / "old.txt").write_text("stale", encoding="utf-8")
     _materialize(inputs, input_root)
     assert not (input_root / "leftover").exists()
+
+
+# --- 11. usage accounting (SPEC §9) -----------------------------------------
+
+_LONG = "x" * 30 + "\nRequirements body here."
+_SHORT = "too short"
+
+
+def _usage(cost: float, *, tokens_in: int = 100, tokens_out: int = 20) -> dict:
+    """A usage report shaped like the CLI's ``result`` frame (SPEC §12)."""
+    return {
+        "cost": cost,
+        "tokens": {
+            "input_tokens": tokens_in,
+            "output_tokens": tokens_out,
+            "cache_read_input_tokens": 7,
+            "cache_creation_input_tokens": 3,
+        },
+        "duration_ms": 1500,
+    }
+
+
+class TestUsageAccounting:
+    """The adapter measured cost all along; until this landed nobody read it."""
+
+    async def test_single_call_lands_in_the_ledger(
+        self, tmp_path: Path, registry: ArtifactRegistry
+    ) -> None:
+        plan = _plan(tmp_path, registry, _agent())
+        ledger = _ledger(tmp_path, ["write"])
+        runtime = MockRuntime(
+            {"*": [ScriptedResponse(files={"doc.md": _LONG}, usage=_usage(0.25))]}
+        )
+        state = await execute_agent_step(plan, runtime, ledger, sleeper=_no_sleep)
+
+        assert state.usage is not None
+        assert state.usage.cost_usd == pytest.approx(0.25)
+        assert state.usage.calls == 1
+        assert state.usage.input_tokens == 100
+        assert state.usage.cache_read_tokens == 7
+        assert state.usage.cache_write_tokens == 3
+        assert state.usage.duration_ms == 1500
+        assert ledger.total_usage().cost_usd == pytest.approx(0.25)
+        assert ledger.usage_by_node()["write"].cost_usd == pytest.approx(0.25)
+
+    async def test_gate_retries_accumulate_what_was_paid(
+        self, tmp_path: Path, registry: ArtifactRegistry
+    ) -> None:
+        """A budget cares about what was PAID, not what the surviving attempt cost."""
+        plan = _plan(tmp_path, registry, _agent(), gate_retries=2)
+        ledger = _ledger(tmp_path, ["write"])
+        runtime = MockRuntime(
+            {
+                "*": [
+                    ScriptedResponse(files={"doc.md": _SHORT}, usage=_usage(0.10)),
+                    ScriptedResponse(files={"doc.md": _LONG}, usage=_usage(0.20)),
+                ]
+            }
+        )
+        state = await execute_agent_step(plan, runtime, ledger, sleeper=_no_sleep)
+
+        assert state.outcome is StepOutcome.ok
+        assert state.usage is not None
+        assert state.usage.calls == 2
+        assert state.usage.cost_usd == pytest.approx(0.30)
+
+    async def test_one_event_per_paid_call_carries_its_ordinal(
+        self, tmp_path: Path, registry: ArtifactRegistry
+    ) -> None:
+        """A run's cost must be reconstructible from events alone (I7)."""
+        plan = _plan(tmp_path, registry, _agent(), gate_retries=1)
+        ledger = _ledger(tmp_path, ["write"])
+        runtime = MockRuntime(
+            {
+                "*": [
+                    ScriptedResponse(files={"doc.md": _SHORT}, usage=_usage(0.10)),
+                    ScriptedResponse(files={"doc.md": _LONG}, usage=_usage(0.20)),
+                ]
+            }
+        )
+        events: list[dict] = []
+        await execute_agent_step(
+            plan, runtime, ledger, on_event=events.append, sleeper=_no_sleep
+        )
+
+        usage_events = [e for e in events if e["type"] == "usage"]
+        assert [e["payload"]["call"] for e in usage_events] == [1, 2]
+        assert [e["payload"]["cost_usd"] for e in usage_events] == [0.10, 0.20]
+        # the per-call event is the CALL's cost, not the running total
+        assert "calls" not in usage_events[0]["payload"]
+
+    async def test_infra_retry_is_paid_for_and_visible(
+        self, tmp_path: Path, registry: ArtifactRegistry
+    ) -> None:
+        """A step that retried used to look exactly like one that ran once."""
+        plan = _plan(tmp_path, registry, _agent(), infra_retries=2)
+        ledger = _ledger(tmp_path, ["write"])
+        runtime = MockRuntime(
+            {
+                "*": [
+                    ScriptedResponse(
+                        completed=False,
+                        agent_error="You've hit your session limit",
+                        usage=_usage(0.05),
+                    ),
+                    ScriptedResponse(files={"doc.md": _LONG}, usage=_usage(0.20)),
+                ]
+            }
+        )
+        events: list[dict] = []
+        state = await execute_agent_step(
+            plan, runtime, ledger, on_event=events.append, sleeper=_no_sleep
+        )
+
+        assert state.outcome is StepOutcome.ok
+        assert state.usage is not None
+        # the failed call burned tokens before the limit answered: it is still paid work
+        assert state.usage.cost_usd == pytest.approx(0.25)
+        assert state.usage.calls == 2
+        retries = [e for e in events if e.get("payload", {}).get("infra_retry")]
+        assert len(retries) == 1
+        assert retries[0]["payload"]["infra_retry"]["attempt"] == 1
+        assert "session limit" in retries[0]["payload"]["infra_retry"]["reason"]
+
+    async def test_failed_step_still_records_what_it_spent(
+        self, tmp_path: Path, registry: ArtifactRegistry
+    ) -> None:
+        plan = _plan(tmp_path, registry, _agent(), gate_retries=0)
+        ledger = _ledger(tmp_path, ["write"])
+        runtime = MockRuntime(
+            {"*": [ScriptedResponse(files={"doc.md": _SHORT}, usage=_usage(0.4))]}
+        )
+        state = await execute_agent_step(plan, runtime, ledger, sleeper=_no_sleep)
+
+        assert state.outcome is StepOutcome.failed_validation
+        assert state.usage is not None
+        assert state.usage.cost_usd == pytest.approx(0.4)
+
+    async def test_runtime_that_reports_nothing_leaves_usage_absent(
+        self, tmp_path: Path, registry: ArtifactRegistry
+    ) -> None:
+        """Usage is optional in the runtime contract (SPEC §12) — MockRuntime's default."""
+        plan = _plan(tmp_path, registry, _agent())
+        ledger = _ledger(tmp_path, ["write"])
+        runtime = MockRuntime({"*": [ScriptedResponse(files={"doc.md": _LONG})]})
+        state = await execute_agent_step(plan, runtime, ledger, sleeper=_no_sleep)
+
+        assert state.usage is None
+        assert ledger.total_usage().calls == 0
+
+    async def test_empty_report_still_counts_the_call(
+        self, tmp_path: Path, registry: ArtifactRegistry
+    ) -> None:
+        plan = _plan(tmp_path, registry, _agent())
+        ledger = _ledger(tmp_path, ["write"])
+        runtime = MockRuntime(
+            {"*": [ScriptedResponse(files={"doc.md": _LONG}, usage={})]}
+        )
+        state = await execute_agent_step(plan, runtime, ledger, sleeper=_no_sleep)
+
+        assert state.usage is not None
+        assert state.usage.calls == 1
+        assert state.usage.cost_usd == 0.0

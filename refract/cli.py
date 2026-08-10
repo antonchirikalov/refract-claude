@@ -26,6 +26,9 @@ import typer
 import yaml
 
 from refract.events import EventWriter, utcnow_iso
+from refract.explain import as_dict as explain_as_dict
+from refract.explain import diagnose
+from refract.explain import render as render_explain
 from refract.graph import ValidationContext, load_agents, load_pipeline
 from refract.models.agent import AgentSpec, tier_at_least
 from refract.models.config import McpFile, ProjectConfig, ProvidersFile
@@ -838,6 +841,19 @@ def status_impl(run_dir: Path | str) -> int:
     return EXIT_OK
 
 
+def explain_impl(run_dir: Path | str, *, as_json: bool = False) -> int:
+    """Post-mortem of a run (SPEC §14). Reads the ledger, events and gate reports."""
+    try:
+        diagnosis = diagnose(run_dir)
+    except FileNotFoundError as exc:
+        raise UsageError(str(exc)) from exc
+    if as_json:
+        typer.echo(json.dumps(explain_as_dict(diagnosis), ensure_ascii=False, indent=2))
+    else:
+        typer.echo(render_explain(diagnosis))
+    return EXIT_OK
+
+
 def render_status(run_dir: Path | str) -> str:
     """Render the run status table from ``state.json`` only (I7)."""
     run_dir = Path(run_dir)
@@ -1148,6 +1164,15 @@ def rerun(
 def status(run_dir: Path = typer.Argument(..., help="run directory")) -> None:
     """Print a run's status from state.json."""
     _run_cli(lambda: status_impl(run_dir))
+
+
+@app.command()
+def explain(
+    run_dir: Path = typer.Argument(..., help="run directory"),
+    as_json: bool = typer.Option(False, "--json", help="machine-readable output"),
+) -> None:
+    """Explain a run: what it cost, what broke first, and what barely passed."""
+    _run_cli(lambda: explain_impl(run_dir, as_json=as_json))
 
 
 @app.command()

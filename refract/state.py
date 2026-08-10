@@ -24,6 +24,7 @@ from refract.models.ledger import (
     StepOutcome,
     StepState,
     StepStatus,
+    Usage,
 )
 
 STATE_FILENAME = "state.json"
@@ -209,8 +210,14 @@ class Ledger:
         started_at: str | None = None,
         finished_at: str | None = None,
         error: str | None = None,
+        usage: Usage | None = None,
     ) -> None:
-        """Insert or update a step record, then persist (one atomic write, I3)."""
+        """Insert or update a step record, then persist (one atomic write, I3).
+
+        ``usage`` is the step's accumulated cost so far and REPLACES what is stored:
+        the caller accumulates over attempts, so a re-run of the same step reports its
+        own total rather than adding to the previous run's.
+        """
         existing = self.state.steps.get(step_id)
         if existing is None:
             existing = StepState(node=node, status=status)
@@ -224,6 +231,8 @@ class Ledger:
             existing.started_at = started_at
         if finished_at is not None:
             existing.finished_at = finished_at
+        if usage is not None:
+            existing.usage = usage
         existing.error = error
         self.save()
 
@@ -253,6 +262,29 @@ class Ledger:
 
     def steps_for_node(self, node_id: str) -> dict[str, StepState]:
         return {sid: s for sid, s in self.state.steps.items() if s.node == node_id}
+
+    def total_usage(self) -> Usage:
+        """What this run has paid so far (SPEC §9).
+
+        DERIVED from the step records rather than stored as a running total: a step
+        re-executed by ``resume``/``rerun`` reports its own total, and a stored sum
+        would have to be reconciled against that on every path. Reused steps carry no
+        usage — their money was spent in the run they were reused from.
+        """
+        total = Usage()
+        for step in self.state.steps.values():
+            if step.usage is not None:
+                total = total.plus(step.usage)
+        return total
+
+    def usage_by_node(self) -> dict[str, Usage]:
+        """Per-node cost roll-up; nodes that paid nothing are absent."""
+        by_node: dict[str, Usage] = {}
+        for step in self.state.steps.values():
+            if step.usage is None:
+                continue
+            by_node[step.node] = by_node.get(step.node, Usage()).plus(step.usage)
+        return by_node
 
     def node_ids(self) -> list[str]:
         return list(self.state.nodes)

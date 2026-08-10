@@ -21,6 +21,7 @@ from refract.cli import (
     AppConfig,
     UsageError,
     _active_run,
+    explain_impl,
     render_status,
     resolve_project,
     resume_impl,
@@ -28,6 +29,7 @@ from refract.cli import (
     status_impl,
     validate_impl,
 )
+from refract.explain import diagnose
 from refract.models.config import ProvidersFile
 from refract.models.ledger import RunStatus
 from refract.models.pipeline import Pipeline
@@ -273,6 +275,61 @@ class TestStatus:
 
         code = status_impl(run_dir)
         assert code == 0
+
+
+class TestExplain:
+    def test_explain_after_a_real_run_reports_cost_and_reads_gate_measures(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """SPEC §14: the post-mortem runs over a real run dir, ledger + events only."""
+        project = _copy_demo_project(tmp_path)
+        app = _app(monkeypatch=monkeypatch)
+
+        def paying_runtime(app: AppConfig, pipeline: Pipeline) -> MockRuntime:
+            return MockRuntime(
+                {
+                    "write:*": [
+                        ScriptedResponse(
+                            files={"requirements.md": REQ},
+                            usage={
+                                "cost": 0.125,
+                                "tokens": {"input_tokens": 500, "output_tokens": 90},
+                                "duration_ms": 2000,
+                            },
+                        )
+                    ]
+                }
+            )
+
+        _, run_dir = run_impl(
+            project,
+            app=app,
+            runtime_factory=paying_runtime,
+            run_id="run_explain",
+            clock=_clock_seq(),
+        )
+
+        diagnosis = diagnose(run_dir)
+        # two map elements, each one paid call
+        assert diagnosis.total.calls == 2
+        assert diagnosis.total.cost_usd == pytest.approx(0.25)
+        assert diagnosis.total.input_tokens == 1000
+        assert diagnosis.root_cause is None
+        assert diagnosis.wasted.cost_usd == pytest.approx(0.0)
+        # the gate wrote its measurements, so the post-mortem can read them
+        report = json.loads(
+            (run_dir / "steps" / "write" / "alpha-txt" / "gate_report.json").read_text(
+                "utf-8"
+            )
+        )
+        assert report["ports"][0]["measures"]["chars"] == len(REQ)
+
+        assert explain_impl(run_dir) == 0
+        assert explain_impl(run_dir, as_json=True) == 0
+
+    def test_explain_without_a_ledger_is_a_usage_error(self, tmp_path: Path) -> None:
+        with pytest.raises(UsageError):
+            explain_impl(tmp_path / "not-a-run")
 
 
 # --- 7. resume: done nodes are not re-executed --------------------------------

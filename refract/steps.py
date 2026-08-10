@@ -16,7 +16,7 @@ import asyncio
 import json
 import random
 import shutil
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,7 +35,7 @@ from refract.artifacts import (
     write_gate_report,
 )
 from refract.models.agent import AgentSpec
-from refract.models.ledger import StepOutcome, StepState, StepStatus
+from refract.models.ledger import StepOutcome, StepState, StepStatus, Usage
 from refract.models.types import ItemInfo, Rule
 from refract.prompt import RevisionContext, build_task_prompt
 from refract.registry import ArtifactRegistry, ResolvedType
@@ -287,6 +287,28 @@ async def execute_agent_step(
     gate_ports = _gate_ports(plan.agent, plan.registry, plan.gate_rules)
     system_prompt = _system_prompt(plan.agent_dir)
 
+    # What this step has paid, over every attempt — including the ones whose output
+    # was archived and thrown away. The adapter measured this all along; until now
+    # nothing read it (SPEC §9).
+    paid = Usage()
+
+    def record_usage(raw: Mapping[str, object] | None) -> None:
+        nonlocal paid
+        reported = Usage.from_report(raw)
+        if reported is None:
+            return
+        paid = paid.plus(reported)
+        emit(
+            {
+                "type": "usage",
+                "step_id": plan.step_id,
+                # `call` is the paid call's ordinal within this step, so the price of
+                # the attempts that did not survive is countable from events alone
+                "payload": {"call": paid.calls}
+                | reported.model_dump(exclude={"calls"}),
+            }
+        )
+
     def finish(
         outcome: StepOutcome, *, tries: int, error: str | None = None
     ) -> StepState:
@@ -300,6 +322,7 @@ async def execute_agent_step(
             started_at=started_at,
             finished_at=clock(),
             error=error,
+            usage=paid if paid.calls else None,
         )
         emit(
             {
@@ -358,6 +381,9 @@ async def execute_agent_step(
             outcome=None,
             tries=tries,
             started_at=started_at,
+            # the turn that produced the question was paid for; a parked step that
+            # showed no cost would understate the run every time a human is asked
+            usage=paid if paid.calls else None,
         )
         emit(
             {
@@ -424,7 +450,7 @@ async def execute_agent_step(
 
         # step 3: run with timeout + infra-error backoff (separate counter)
         result = await _run_with_infra_retries(
-            runtime, spec, plan.infra_retries, emit, sleeper
+            runtime, spec, plan.infra_retries, emit, sleeper, record_usage
         )
         if result is None:
             return finish(StepOutcome.timeout, tries=tries, error="timeout")
@@ -465,8 +491,14 @@ async def _run_with_infra_retries(
     infra_retries: int,
     emit: EventCallback,
     sleeper: Callable[[float], Awaitable[None]],
+    record_usage: Callable[[Mapping[str, object] | None], None],
 ) -> StepResult | None:
-    """Run the step; retry infra errors with backoff. None means timeout (§10.2)."""
+    """Run the step; retry infra errors with backoff. None means timeout (§10.2).
+
+    Every call is reported to ``record_usage``, failed ones included: an infra retry
+    can burn tokens before the connection breaks, and a budget that only counts
+    successful calls understates the run.
+    """
     infra_attempt = 0
     while True:
         try:
@@ -475,9 +507,26 @@ async def _run_with_infra_retries(
             )
         except asyncio.TimeoutError:
             return None
+        record_usage(result.usage)
         if result.completed:
             return result
         infra_attempt += 1
         if infra_attempt > infra_retries:
             return result
+        # a step that retried three times used to look exactly like one that ran once:
+        # the wait, the reason and the count left no trace anywhere (SPEC §9)
+        emit(
+            {
+                "type": "log",
+                "step_id": spec.step_id,
+                "payload": {
+                    "infra_retry": {
+                        "attempt": infra_attempt,
+                        "of": infra_retries,
+                        "delay_s": _backoff_delay(infra_attempt),
+                        "reason": result.agent_error or "no reason reported",
+                    }
+                },
+            }
+        )
         await sleeper(_backoff_delay(infra_attempt))

@@ -608,3 +608,68 @@ def test_slugify_truncates_so_run_paths_stay_within_the_windows_limit() -> None:
     taken = {slug}
     other = unique_slug(slugify(long_name.replace("ukrainy", "ukrainoyu")), taken)
     assert other != slug
+
+
+# --- gate measurements (SPEC §10.2) -----------------------------------------
+
+
+class TestMeasureRules:
+    """The gate's verdict is binary; the measurements say HOW it passed."""
+
+    def test_min_length_records_the_floor_and_the_actual(self) -> None:
+        from refract.models.types import MinLengthRule
+        from refract.registry import measure_rules
+
+        text = "x" * 250
+        measures = measure_rules([MinLengthRule(rule="min_length", value=200)], text)
+        assert measures["chars"] == 250
+        assert measures["min_length"] == 200
+
+    def test_regex_recorded_per_pattern_pass_or_fail(self) -> None:
+        from refract.models.types import RegexRule
+        from refract.registry import measure_rules
+
+        rules = [
+            RegexRule(rule="regex", pattern=r"^## Risks", flags="m"),
+            RegexRule(rule="regex", pattern=r"^## Missing", flags="m"),
+        ]
+        measures = measure_rules(rules, "## Risks\nsomething\n")
+        assert measures["regex"] == {r"^## Risks": True, r"^## Missing": False}
+
+    def test_citations_counted(self) -> None:
+        from refract.models.types import CitationClosureRule
+        from refract.registry import measure_rules
+
+        text = (
+            "Body cites [1] and [2].\n\n"
+            "## REFERENCES\n"
+            "1. A source entry long enough to identify the work.\n"
+            "2. Short one.\n"
+        )
+        rule = CitationClosureRule(
+            rule="citation_closure", list_heading="REFERENCES", min_entry_chars=40
+        )
+        measures = measure_rules([rule], text)
+        citations = measures["citations"]
+        assert isinstance(citations, dict)
+        assert citations["entries"] == 2
+        assert citations["cited"] == 2
+        assert citations["shortest_entry"] == len("Short one.")
+        assert citations["min_entry_chars"] == 40
+
+    def test_measuring_never_decides_the_verdict(self) -> None:
+        """A text that FAILS is still measured — that is the point (SPEC §10.2)."""
+        from refract.models.types import MinLengthRule
+        from refract.registry import apply_rules, measure_rules
+
+        rule = MinLengthRule(rule="min_length", value=1000)
+        assert apply_rules([rule], "short") != []
+        assert measure_rules([rule], "short") == {"chars": 5, "min_length": 1000}
+
+    def test_no_source_list_yields_no_citation_measures(self) -> None:
+        from refract.models.types import CitationClosureRule
+        from refract.registry import measure_rules
+
+        rule = CitationClosureRule(rule="citation_closure", list_heading="REFERENCES")
+        measures = measure_rules([rule], "prose with no list at all")
+        assert "citations" not in measures

@@ -19,7 +19,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from refract.models.types import ItemInfo, Rule, TypeKind
-from refract.registry import ResolvedType, apply_rules
+from refract.registry import ResolvedType, apply_rules, measure_rules
 
 # --- the single linking helper (SPEC §10; Windows symlink fallback) --------
 
@@ -175,6 +175,10 @@ class PortGateResult(BaseModel):
     port: str
     ok: bool
     problems: list[str] = Field(default_factory=list)
+    # what the rules measured, recorded on a PASS as well (SPEC §10.2): the verdict
+    # alone cannot tell a document that cleared its floor by a hair from one that
+    # cleared it fourfold, and only one of those is a finished artifact
+    measures: dict[str, object] = Field(default_factory=dict)
 
 
 class GateReport(BaseModel):
@@ -190,6 +194,7 @@ def check_port(output_dir: Path | str, spec: GatePort) -> PortGateResult:
     """Validate one produced port: existence, JSON schema, rules (SPEC §10.2)."""
     path = artifact_path(output_dir, spec.port, spec.rtype)
     problems: list[str] = []
+    measures: dict[str, object] = {}
 
     if not path.exists():
         return PortGateResult(port=spec.port, ok=False, problems=["output missing"])
@@ -211,6 +216,7 @@ def check_port(output_dir: Path | str, spec: GatePort) -> PortGateResult:
             problems.extend(spec.rtype.validate_json(data))
         problems.extend(spec.rtype.check_rules(text))
         problems.extend(apply_rules(spec.extra_rules, text))
+        measures = measure_rules(list(spec.rtype.rules) + list(spec.extra_rules), text)
     else:
         # dir/any: existence alone is too weak — an agent that produced nothing
         # would still pass (SPEC §10.2 > CHANGED). Require real content.
@@ -218,12 +224,21 @@ def check_port(output_dir: Path | str, spec: GatePort) -> PortGateResult:
             # dot-entries are tooling artifacts, not content (as in §13): an agent
             # that wrote only a `.keep` produced nothing, and a discover agent that
             # found nothing must not pass as ok (SPEC §10.2 > CHANGED, §20.2).
-            if not any(c for c in path.iterdir() if not c.name.startswith(".")):
+            content = [c for c in path.iterdir() if not c.name.startswith(".")]
+            if not content:
                 problems.append("output directory has no content")
-        elif path.stat().st_size == 0:
-            problems.append("output file is empty")
+            # a directory that passed with one file is exactly the "silently thin
+            # output" a run never reported (SPEC §10.2)
+            measures = {"entries": len(content)}
+        else:
+            size = path.stat().st_size
+            if size == 0:
+                problems.append("output file is empty")
+            measures = {"bytes": size}
 
-    return PortGateResult(port=spec.port, ok=not problems, problems=problems)
+    return PortGateResult(
+        port=spec.port, ok=not problems, problems=problems, measures=measures
+    )
 
 
 def run_gate(output_dir: Path | str, ports: list[GatePort]) -> GateReport:

@@ -290,3 +290,116 @@ class TestConcurrentReaders:
 
         with pytest.raises(RuntimeError, match="could not read"):
             read_state(tmp_path)
+
+
+# --- usage accounting (SPEC §9) ---------------------------------------------
+
+
+def test_usage_from_report_normalises_the_runtime_dialect() -> None:
+    """``StepResult.usage`` is a loose dict by contract (SPEC §12)."""
+    from refract.models.ledger import Usage
+
+    assert Usage.from_report(None) is None
+
+    empty = Usage.from_report({})
+    assert empty is not None and empty.calls == 1 and empty.cost_usd == 0.0
+
+    full = Usage.from_report(
+        {
+            "cost": 0.42,
+            "tokens": {
+                "input_tokens": 1000,
+                "output_tokens": 250,
+                "cache_read_input_tokens": 60,
+                "cache_creation_input_tokens": 40,
+            },
+            "duration_ms": 8000,
+        }
+    )
+    assert full is not None
+    assert (full.cost_usd, full.input_tokens, full.output_tokens) == (0.42, 1000, 250)
+    assert (full.cache_read_tokens, full.cache_write_tokens) == (60, 40)
+    assert full.duration_ms == 8000 and full.calls == 1
+
+
+def test_usage_from_report_survives_garbage() -> None:
+    """A runtime reporting nonsense must not take the run down with it."""
+    from refract.models.ledger import Usage
+
+    junk = Usage.from_report({"cost": "free", "tokens": "lots", "duration_ms": None})
+    assert junk is not None
+    assert junk.cost_usd == 0.0 and junk.input_tokens == 0 and junk.calls == 1
+    # booleans are not numbers here: True must not become a cost of 1.0
+    assert Usage.from_report({"cost": True}) == Usage(calls=1)
+
+
+def test_total_and_per_node_usage_are_derived(tmp_path: Path) -> None:
+    """Derived, not stored: a re-executed step reports its own total (SPEC §9)."""
+    from refract.models.ledger import Usage
+
+    ledger = _make_ledger(tmp_path)
+    ledger.set_step(
+        "a", node="a", status=StepStatus.done, usage=Usage(cost_usd=0.10, calls=1)
+    )
+    ledger.set_step(
+        "b:1", node="b", status=StepStatus.done, usage=Usage(cost_usd=0.20, calls=2)
+    )
+    ledger.set_step(
+        "b:2", node="b", status=StepStatus.done, usage=Usage(cost_usd=0.05, calls=1)
+    )
+    # a reused step spent nothing in THIS run
+    ledger.set_step("b:3", node="b", status=StepStatus.reused)
+
+    total = ledger.total_usage()
+    assert total.cost_usd == pytest.approx(0.35)
+    assert total.calls == 4
+    by_node = ledger.usage_by_node()
+    assert by_node["a"].cost_usd == pytest.approx(0.10)
+    assert by_node["b"].cost_usd == pytest.approx(0.25)
+    assert "b:3" not in by_node
+
+
+def test_re_running_a_step_replaces_its_usage_rather_than_doubling(
+    tmp_path: Path,
+) -> None:
+    from refract.models.ledger import Usage
+
+    ledger = _make_ledger(tmp_path)
+    ledger.set_step(
+        "a", node="a", status=StepStatus.failed, usage=Usage(cost_usd=0.30, calls=3)
+    )
+    ledger.set_step(
+        "a", node="a", status=StepStatus.done, usage=Usage(cost_usd=0.10, calls=1)
+    )
+    assert ledger.total_usage().cost_usd == pytest.approx(0.10)
+
+
+def test_usage_survives_a_ledger_round_trip(tmp_path: Path) -> None:
+    from refract.models.ledger import Usage
+
+    ledger = _make_ledger(tmp_path)
+    ledger.set_step(
+        "a",
+        node="a",
+        status=StepStatus.done,
+        usage=Usage(cost_usd=0.5, input_tokens=10, calls=1),
+    )
+    reloaded = Ledger.load(tmp_path)
+    step = reloaded.get_step("a")
+    assert step is not None and step.usage is not None
+    assert step.usage.cost_usd == pytest.approx(0.5)
+    assert step.usage.input_tokens == 10
+
+
+def test_a_ledger_written_before_usage_existed_still_loads(tmp_path: Path) -> None:
+    """Old runs have no ``usage`` key — reading them must not fail (SPEC §9)."""
+    ledger = _make_ledger(tmp_path)
+    ledger.set_step("a", node="a", status=StepStatus.done, outcome=StepOutcome.ok)
+    raw = json.loads((tmp_path / STATE_FILENAME).read_text("utf-8"))
+    del raw["steps"]["a"]["usage"]
+    (tmp_path / STATE_FILENAME).write_text(json.dumps(raw), encoding="utf-8")
+
+    reloaded = Ledger.load(tmp_path)
+    step = reloaded.get_step("a")
+    assert step is not None and step.usage is None
+    assert reloaded.total_usage() == reloaded.total_usage().__class__()

@@ -169,6 +169,36 @@ def apply_rules(rules: Sequence[Rule], text: str) -> list[str]:
     return failures
 
 
+def measure_rules(rules: Sequence[Rule], text: str) -> dict[str, object]:
+    """What the rules MEASURED, pass or fail (SPEC §10.2).
+
+    The gate's verdict is binary, and that hid a question worth asking: a report that
+    cleared a 20 000-character floor at 20 100 is not the same artifact as one that
+    cleared it at 80 000, and nothing in the run said which had happened. Measurements
+    are recorded on success too, so `refract explain` can point at what barely passed.
+
+    Never raises and never affects the verdict — a measurement that cannot be taken is
+    simply absent from the result.
+    """
+    measures: dict[str, object] = {"chars": len(text)}
+    regexes: dict[str, bool] = {}
+    for rule in rules:
+        if isinstance(rule, RegexRule):
+            flags = 0
+            for ch in rule.flags or "":
+                flags |= _REGEX_FLAGS.get(ch, 0)
+            regexes[rule.pattern] = re.search(rule.pattern, text, flags) is not None
+        elif isinstance(rule, MinLengthRule):
+            measures["min_length"] = rule.value
+        elif isinstance(rule, CitationClosureRule):
+            facts = measure_citations(text, rule)
+            if facts is not None:
+                measures["citations"] = facts
+    if regexes:
+        measures["regex"] = regexes
+    return measures
+
+
 # --- citation closure ------------------------------------------------------
 
 
@@ -183,18 +213,49 @@ def _cited_numbers(body: str) -> set[int]:
     return cited
 
 
+def _split_citations(
+    text: str, rule: CitationClosureRule
+) -> tuple[str, list[tuple[str, str]]] | None:
+    """``(prose before the list, [(number, entry), ...])``, or None if there is no list.
+
+    One parser for both the check and the measurement, so a document can never be
+    judged against one reading of its source list and described by another.
+    """
+    parts = re.split(rf"^#{{1,3}}\s*(?:{rule.list_heading}).*$", text, flags=re.M)
+    if len(parts) < 2:
+        return None
+    entries = re.findall(r"^\s*(\d+)[.)]\s+(.+?)\s*$", parts[-1], flags=re.M)
+    return parts[0], entries
+
+
+def measure_citations(text: str, rule: CitationClosureRule) -> dict[str, object] | None:
+    """Countable facts about the reference apparatus (SPEC §10.2); None if no list."""
+    parsed = _split_citations(text, rule)
+    if parsed is None:
+        return None
+    body, entries = parsed
+    facts: dict[str, object] = {
+        "entries": len(entries),
+        "cited": len(_cited_numbers(body)),
+    }
+    if entries:
+        facts["shortest_entry"] = min(len(entry.strip()) for _, entry in entries)
+    if rule.min_entry_chars:
+        facts["min_entry_chars"] = rule.min_entry_chars
+    return facts
+
+
 def check_citation_closure(text: str, rule: CitationClosureRule) -> list[str]:
     """Every reference resolves, every entry is used, no gaps, no stub entries.
 
     A fabricated reference and an entry nobody cites are both countable defects;
     catching them here means the critic never has to spend a round on them.
     """
-    parts = re.split(rf"^#{{1,3}}\s*(?:{rule.list_heading}).*$", text, flags=re.M)
-    if len(parts) < 2:
+    parsed = _split_citations(text, rule)
+    if parsed is None:
         return [f"citation_closure: no source list under {rule.list_heading!r}"]
 
-    body, listing = parts[0], parts[-1]
-    entries = re.findall(r"^\s*(\d+)[.)]\s+(.+?)\s*$", listing, flags=re.M)
+    body, entries = parsed
     if not entries:
         return [f"citation_closure: source list under {rule.list_heading!r} is empty"]
 
