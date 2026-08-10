@@ -1,0 +1,20 @@
+name: study_extractor
+version: 1
+description: >
+  Reads one source and takes a reading note from it: what the source establishes, the
+  figures it carries, the identifiers it names, and the bibliographic data needed to
+  cite it under the standard the brief names. The per-item worker of a research report
+  pipeline — the engine fans it out over the found source collection via a map node
+  (§10.3).
+consumes:
+  - { port: source, type: source@v1 }
+  # broadcast to every item step by the map node: the note's language, the citation
+  # standard and the aspect numbering all come from the assignment, and none of them
+  # can be hardcoded in a library agent. The prompt confines its use to those three
+  # things, so the brief cannot steer WHAT gets extracted from the source.
+  - { port: brief, type: brief@v1 }
+produces:
+  - { port: note, type: study_note@v1 }
+needs: [read, edit]
+defaults:
+  timeout_s: 1800

@@ -10,6 +10,7 @@ resolvability → §16 constraints → security warnings.
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -434,6 +435,7 @@ class _Validator:
         if spec is None:
             return
         self._check_agent_contract(node.id, spec)
+        self._check_gate_rules(node.id, spec, node.gate_rules)
         if node.map is not None:
             self._shape_map(node, spec)
 
@@ -464,6 +466,33 @@ class _Validator:
                 node.id,
                 f"discover agent {spec.ref!r} must produce a dir-kind artifact "
                 f"(port {primary[0].port!r} is {rtype.kind.value})",
+            )
+
+    def _check_gate_rules(
+        self, node_id: str, spec: AgentSpec, gate_rules: Sequence[object]
+    ) -> None:
+        """``gate_rules`` tighten the primary port, so that port must be a file (§8).
+
+        Rules read the artifact's text; on a ``dir``/``any`` port there is nothing to
+        read, and a rule that can never run would silently promise a guarantee.
+        """
+        if not gate_rules:
+            return
+        primary = [p for p in spec.produces if not p.optional]
+        if not primary:
+            self.err(
+                Code.E_GATE_RULES_SHAPE,
+                node_id,
+                f"gate_rules on a node whose agent {spec.ref!r} produces nothing",
+            )
+            return
+        rtype = self.ctx.registry.get(primary[0].type)
+        if rtype is not None and rtype.kind.value != "file":
+            self.err(
+                Code.E_GATE_RULES_SHAPE,
+                node_id,
+                f"gate_rules apply to the primary port {primary[0].port!r}, which is "
+                f"{rtype.kind.value}-kind — rules only apply to file artifacts",
             )
 
     def _check_agent_contract(self, node_id: str, spec: AgentSpec) -> None:
@@ -526,6 +555,7 @@ class _Validator:
         critic = self.agent(node.critic.agent)
         if critic is not None:
             self._check_agent_contract(node.id, critic)
+            self._check_gate_rules(node.id, critic, node.critic.gate_rules)
             primary = self._primary_produce(critic)
             if primary is None or primary.type != "verdict@v1":
                 self.err(
@@ -537,6 +567,7 @@ class _Validator:
             body = self.agent(block.agent)
             if body is not None:
                 self._check_agent_contract(node.id, body)
+                self._check_gate_rules(node.id, body, block.gate_rules)
             self._check_chain_refs(node, i, block.inputs)
         self._check_chain_refs(node, len(node.body_chain), node.critic.inputs)
 

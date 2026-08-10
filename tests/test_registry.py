@@ -132,6 +132,85 @@ types:
         assert len(failures) == 1
 
 
+# --- rules: citation_closure -------------------------------------------------
+
+
+def _doc(body: str, listing: str) -> str:
+    return f"{body}\n\n## СПИСОК ВИКОРИСТАНИХ ДЖЕРЕЛ\n\n{listing}\n"
+
+
+ENTRY_A = "Європол. European Union Terrorism Situation and Trend Report 2025. URL: ..."
+ENTRY_B = "Конвенція Ради Європи про запобігання тероризму (CETS № 196). URL: ..."
+
+
+class TestCitationClosure:
+    """Countable defects of a source list, settled without spending a review round."""
+
+    def _rule(self, tmp_path: Path, min_entry_chars: int = 0) -> object:
+        _write_registry(
+            tmp_path,
+            f"""
+version: "0.1"
+types:
+  report@v1:
+    kind: file
+    format: markdown
+    rules:
+      - rule: citation_closure
+        list_heading: СПИСОК ВИКОРИСТАНИХ ДЖЕРЕЛ
+        min_entry_chars: {min_entry_chars}
+""",
+        )
+        t = ArtifactRegistry.load(tmp_path).get("report@v1")
+        assert t is not None
+        return t
+
+    def test_closed_apparatus_passes(self, tmp_path: Path) -> None:
+        t = self._rule(tmp_path)
+        doc = _doc(
+            "Як зазначає звіт [1, с. 12], а також конвенція [2].",
+            f"1. {ENTRY_A}\n2. {ENTRY_B}",
+        )
+        assert t.check_rules(doc) == []  # type: ignore[attr-defined]
+
+    def test_reference_to_a_source_that_is_not_listed_fails(
+        self, tmp_path: Path
+    ) -> None:
+        """The fabricated-citation case: the prose cites [3], the list has two entries."""
+        t = self._rule(tmp_path)
+        doc = _doc("Дані наведено у звіті [3].", f"1. {ENTRY_A}\n2. {ENTRY_B}")
+        failures = t.check_rules(doc)  # type: ignore[attr-defined]
+        assert any("[3]" in f or "3]" in f for f in failures)
+
+    def test_entry_nobody_cites_fails(self, tmp_path: Path) -> None:
+        t = self._rule(tmp_path)
+        doc = _doc("Лише перше джерело [1].", f"1. {ENTRY_A}\n2. {ENTRY_B}")
+        assert any("never cited" in f for f in t.check_rules(doc))  # type: ignore[attr-defined]
+
+    def test_numbering_gap_fails(self, tmp_path: Path) -> None:
+        t = self._rule(tmp_path)
+        doc = _doc("Джерела [1] та [3].", f"1. {ENTRY_A}\n3. {ENTRY_B}")
+        assert any("without gaps" in f for f in t.check_rules(doc))  # type: ignore[attr-defined]
+
+    def test_stub_entry_fails_when_a_floor_is_set(self, tmp_path: Path) -> None:
+        """A live run shipped `Kurt v. Turkey (1998).` as a bibliographic entry."""
+        t = self._rule(tmp_path, min_entry_chars=40)
+        doc = _doc("Справа [1] і звіт [2].", f"1. Kurt v. Turkey (1998).\n2. {ENTRY_A}")
+        assert any("too short" in f for f in t.check_rules(doc))  # type: ignore[attr-defined]
+
+    def test_missing_list_fails(self, tmp_path: Path) -> None:
+        t = self._rule(tmp_path)
+        assert t.check_rules("Текст без списку джерел [1].")  # type: ignore[attr-defined]
+
+    def test_markdown_links_are_not_read_as_citations(self, tmp_path: Path) -> None:
+        t = self._rule(tmp_path)
+        doc = _doc(
+            "Див. [офіційний портал](https://example.org) і звіт [1], конвенцію [2].",
+            f"1. {ENTRY_A}\n2. {ENTRY_B}",
+        )
+        assert t.check_rules(doc) == []  # type: ignore[attr-defined]
+
+
 # --- inline flag / should_inline --------------------------------------------
 
 
@@ -502,3 +581,30 @@ types:
         with pytest.raises(RegistryError) as exc_info:
             ArtifactRegistry.load(tmp_path)
         assert exc_info.value.code == Code.E_SCHEMA
+
+
+def test_slugify_truncates_so_run_paths_stay_within_the_windows_limit() -> None:
+    """A live discover node crashed assembling its collection (SPEC §5, I-Windows).
+
+    The agent had named a source file 63 characters long; nested as
+    ``_out/sources/<slug>/<same-name>.md`` under a run tree, the path passed 260
+    characters and ``shutil.copyfile`` raised a bare ``FileNotFoundError`` — which
+    reads as "the agent produced nothing".
+    """
+    from refract.registry import MAX_SLUG_CHARS, slugify, unique_slug
+
+    long_name = (
+        "rada-yevropy-konventsiya-poperedzhennya-teroryzmu-ratyfikatsiya-ukrainy.md"
+    )
+    slug = slugify(long_name)
+    assert len(slug) <= MAX_SLUG_CHARS
+    assert not slug.endswith("-")  # cut on a separator, not mid-word
+    assert slug.startswith("rada-yevropy-konventsiya")
+
+    # short names are untouched, so existing slugs (and their reuse keys) do not move
+    assert slugify("Report 2024.md") == "report-2024-md"
+
+    # truncation can collide; that is the existing collision path's job
+    taken = {slug}
+    other = unique_slug(slugify(long_name.replace("ukrainy", "ukrainoyu")), taken)
+    assert other != slug

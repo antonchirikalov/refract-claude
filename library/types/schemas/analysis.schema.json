@@ -1,0 +1,155 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "analysis@v1",
+  "description": "Subject-matter analysis over a set of reading notes, organised by the brief's required aspects. The stage between reading and writing: what the sources establish TOGETHER, where they diverge, what follows. Gaps get one narrow field per aspect on purpose — a live run without this stage turned the missing material into the report's subject.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["aspects"],
+  "properties": {
+    "aspects": {
+      "type": "array",
+      "description": "One entry per required aspect of the brief, in the brief's own order. An aspect the notes cannot support still gets an entry — with `established` empty and `material_gaps` filled.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["aspect", "established"],
+        "properties": {
+          "aspect": {
+            "type": "string",
+            "description": "The aspect as the brief formulates it."
+          },
+          "established": {
+            "type": "array",
+            "description": "What the sources establish about the SUBJECT when read together. Each finding is a substantive statement, not a remark about a source's availability or quality.",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": ["statement", "notes"],
+              "properties": {
+                "statement": {
+                  "type": "string",
+                  "description": "One self-contained substantive statement, in the report's language."
+                },
+                "notes": {
+                  "type": "array",
+                  "description": "Identifiers of the notes carrying it (each note's `source` field). Two or more means independent corroboration — unless a note marks its source as a restatement or compilation.",
+                  "items": { "type": "string" }
+                },
+                "locator": {
+                  "type": "string",
+                  "description": "Where in the source it sits, as the note recorded it."
+                },
+                "figures": {
+                  "type": "array",
+                  "description": "Quantities this finding rests on, each with its period, carried over verbatim from the notes.",
+                  "items": { "type": "string" }
+                }
+              }
+            }
+          },
+          "sequence": {
+            "type": "array",
+            "description": "Dated order of events the aspect turns on. A gap in the order is a result of analysis; no single note could assemble it.",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": ["date", "event"],
+              "properties": {
+                "date": { "type": "string" },
+                "event": { "type": "string" },
+                "notes": { "type": "array", "items": { "type": "string" } }
+              }
+            }
+          },
+          "divergences": {
+            "type": "array",
+            "description": "Where sources disagree: both positions with attribution, plus which is better founded and why. Material for analysis, not a defect to hide.",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": ["question", "positions"],
+              "properties": {
+                "question": { "type": "string" },
+                "positions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "required": ["claim", "note"],
+                    "properties": {
+                      "claim": { "type": "string" },
+                      "note": { "type": "string" },
+                      "primacy": {
+                        "type": "string",
+                        "description": "How direct this source is on this point, as the note recorded it."
+                      }
+                    }
+                  }
+                },
+                "assessment": {
+                  "type": "string",
+                  "description": "Which position carries more weight and on what ground. Empty if the notes do not settle it."
+                }
+              }
+            }
+          },
+          "comparison": {
+            "type": "array",
+            "description": "The compared cases set against each other dimension by dimension — what makes a report comparative rather than a pile of separate write-ups. What the cases are (jurisdictions, vendors, methods, periods, populations) comes from the brief.",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": ["dimension", "cases"],
+              "properties": {
+                "dimension": { "type": "string" },
+                "cases": {
+                  "type": "array",
+                  "description": "What each compared case shows on this dimension.",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "required": ["case", "finding"],
+                    "properties": {
+                      "case": { "type": "string" },
+                      "finding": { "type": "string" },
+                      "notes": { "type": "array", "items": { "type": "string" } }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "implications": {
+            "type": "array",
+            "description": "What follows from the findings for the state of the matter and where it is heading — the outlook half of most assignments. Derived from the material, never from general knowledge of the field.",
+            "items": { "type": "string" }
+          },
+          "material_gaps": {
+            "type": "array",
+            "description": "What the notes do not carry for this aspect. ONE line per gap: the report states it once and moves on. Deliberately narrow — an aspect's gaps are not its subject.",
+            "items": { "type": "string" }
+          },
+          "single_source_findings": {
+            "type": "array",
+            "description": "Findings resting on one substantive source, so the report can mark them where they are stated instead of discussing its sourcing at length.",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    "cross_aspect": {
+      "type": "array",
+      "description": "Observations visible only across aspects — a commitment that explains a rule that explains a pattern in practice. The raw material of the concluding section.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["observation"],
+        "properties": {
+          "observation": { "type": "string" },
+          "aspects": { "type": "array", "items": { "type": "string" } },
+          "notes": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

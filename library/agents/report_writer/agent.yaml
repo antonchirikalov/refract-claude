@@ -1,0 +1,27 @@
+name: report_writer
+version: 1
+description: >
+  Writes a sourced analytical report from the subject-matter analysis and the reading
+  notes behind it. The body agent of a research pipeline's refine loop: it drafts the
+  report, a critic reviews it, and on 'revise' it drafts again. Long-form by design —
+  the report is built section by section across many writes rather than emitted in one
+  message. Language and register come from the brief, never from this package.
+consumes:
+  # the assignment itself: length, required aspects, citation standard, language.
+  # Without it the writer can only infer the terms it is being held to from the sources.
+  - { port: brief, type: brief@v1 }
+  # the backbone: findings already reconciled across sources, with chronologies,
+  # comparisons and divergences. Without it the writer had only per-source notes
+  # and no reconciled subject matter to expand, so volume came from discussing the
+  # sources instead — the failure this port exists to prevent.
+  - { port: analysis, type: analysis@v1 }
+  - { port: notes, type: collection<study_note@v1> }
+produces:
+  - { port: report, type: analytic_report@v1 }
+# deliberately no search capability: a writer that can look things up can state a
+# fact that no study note carries, and the chain claim → note → fetched source is
+# what makes the document checkable. A gap the notes do not cover is reported as a
+# gap, not quietly filled in.
+needs: [read, edit]
+defaults:
+  timeout_s: 7200

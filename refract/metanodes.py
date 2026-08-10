@@ -309,6 +309,8 @@ def _plan(
         gate_retries=pick("gate_retries", 2),
         infra_retries=pick("infra_retries", 2),
         revision=revision,
+        # a loop's body/critic block may tighten its own gate (SPEC §8)
+        gate_rules=list(getattr(block, "gate_rules", []) or []),
     )
 
 

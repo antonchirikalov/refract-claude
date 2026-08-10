@@ -57,7 +57,37 @@ class MinLengthRule(BaseModel):
     value: int = Field(ge=0)
 
 
-Rule = Annotated[Union[RegexRule, MinLengthRule], Field(discriminator="rule")]
+class CitationClosureRule(BaseModel):
+    """Content rule: the document's numbered source list has to hold together.
+
+    For a document that cites sources as ``[12]`` / ``[12, с. 45]`` against a
+    numbered list under ``list_heading``. Fabricated references and orphaned
+    entries are countable, so they are settled mechanically instead of costing a
+    critic a review round — the same reason ``min_length`` exists.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    rule: Literal["citation_closure"]
+    # a regex, not a literal, so one type can serve documents in several languages:
+    # "СПИСОК ВИКОРИСТАНИХ ДЖЕРЕЛ|REFERENCES|BIBLIOGRAPHY"
+    list_heading: str
+    # a bibliographic entry that is only a few characters long is a stub, not a
+    # description someone could follow back to the source
+    min_entry_chars: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_heading(self) -> "CitationClosureRule":
+        try:
+            re.compile(self.list_heading)
+        except re.error as exc:
+            raise ValueError(f"invalid list_heading regex: {exc}") from exc
+        return self
+
+
+Rule = Annotated[
+    Union[RegexRule, MinLengthRule, CitationClosureRule],
+    Field(discriminator="rule"),
+]
 
 
 class ArtifactTypeDef(BaseModel):

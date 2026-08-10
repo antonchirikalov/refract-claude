@@ -1,0 +1,137 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "study_note@v1",
+  "description": "Reading note taken from ONE source: what it establishes, with the bibliographic data needed to cite it under the citation standard the brief names. One per source; assembled into collection<study_note@v1> by the map node.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["source", "source_kind", "primacy", "bibliography", "key_points", "trust_level"],
+  "properties": {
+    "source": {
+      "type": "string",
+      "description": "Human-readable identifier of the source this note came from. Downstream stages reference notes by this value."
+    },
+    "is_source": {
+      "type": "boolean",
+      "default": true,
+      "description": "False for a working file that reached the collection but is not source material (a search log, a list of unreachable sites). Such a file must never appear in the report's reference list.",
+      "$comment": "The engine keeps the finder's own _index.json and open-questions.md out of the collection, but a kept source file can still turn out to be a list of what could not be retrieved rather than material; a live run had one cited as a source."
+    },
+    "source_kind": {
+      "type": "string",
+      "description": "The nature of the document, chosen by what it IS rather than what it is about. A machine vocabulary: language-neutral tokens, whatever language the note's prose is in.",
+      "enum": [
+        "primary_document",
+        "official_record",
+        "statistics",
+        "research",
+        "institutional_report",
+        "practitioner",
+        "analysis",
+        "media",
+        "other"
+      ]
+    },
+    "source_kind_detail": {
+      "type": "string",
+      "description": "What the document is in the brief's own terms (statute, ruling, standard, benchmark, filing, vendor manual). Required in spirit when source_kind is `other`: the generic vocabulary is deliberately coarse, and this field is where the specificity lives."
+    },
+    "primacy": {
+      "type": "string",
+      "description": "How directly this source carries what it reports. Kept separate from trust_level because they answer different questions: a thorough news article restating an official figure is a restatement however reliable it is, and counting it as a second source would make a claim look twice as well founded as it is.",
+      "enum": [
+        "primary",
+        "official_restatement",
+        "secondary_restatement",
+        "compilation"
+      ]
+    },
+    "bibliography": {
+      "type": "object",
+      "description": "Everything needed to build the reference entry. Leave a field out rather than inventing it.",
+      "additionalProperties": true,
+      "required": ["entry"],
+      "properties": {
+        "entry": {
+          "type": "string",
+          "description": "The source formatted as one reference entry per the citation standard the brief names, built ONLY from data the source states about itself."
+        },
+        "authors": { "type": "string" },
+        "title": { "type": "string" },
+        "container": {
+          "type": "string",
+          "description": "Journal, collection, publisher or issuing body."
+        },
+        "year": { "type": "string" },
+        "url": { "type": "string" },
+        "accessed": { "type": "string", "description": "Date of access, ISO 8601." },
+        "incomplete_fields": {
+          "type": "array",
+          "description": "Bibliographic fields the source does not state, so downstream stages know the entry is partial rather than guessing at it.",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "key_points": {
+      "type": "array",
+      "description": "What this source genuinely establishes. Empty is valid for a source that turned out to carry nothing.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["text"],
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "One self-contained statement, in the report's language, of what the source establishes."
+          },
+          "quote": {
+            "type": "string",
+            "description": "Verbatim wording where the wording itself carries weight."
+          },
+          "locator": {
+            "type": "string",
+            "description": "Page, section, article, paragraph, table — whatever lets a reader verify the statement."
+          }
+        }
+      }
+    },
+    "figures": {
+      "type": "array",
+      "description": "Quantitative data, each with the period it covers. A figure without its period cannot be used in an argument about change over time.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["indicator", "value"],
+        "properties": {
+          "indicator": { "type": "string" },
+          "value": { "type": "string" },
+          "period": {
+            "type": "string",
+            "description": "The period the figure covers, as the source states it. Record the absence rather than inferring a period from context."
+          },
+          "unit": { "type": "string" },
+          "locator": { "type": "string" }
+        }
+      }
+    },
+    "cited_refs": {
+      "type": "array",
+      "description": "Identifiers this source names, as it names them: norms, case numbers, standards, datasets, prior work, registration numbers.",
+      "items": { "type": "string" }
+    },
+    "aspect_ids": {
+      "type": "array",
+      "description": "Which of the brief's required aspects this note can support, by the brief's own numbering. What makes coverage checkable instead of a matter of opinion.",
+      "items": { "type": "string" }
+    },
+    "open_questions": {
+      "type": "array",
+      "description": "Gaps, contradictions or ambiguities in this source. Prefer flagging over smoothing over.",
+      "items": { "type": "string" }
+    },
+    "trust_level": {
+      "type": "string",
+      "description": "How much weight the source carries, given its authority and completeness. Orthogonal to primacy.",
+      "enum": ["high", "medium", "low"]
+    }
+  }
+}

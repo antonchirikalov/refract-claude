@@ -59,15 +59,28 @@ class EventWriter:
         self._seq = _last_seq(self.path)  # resume continues the sequence
 
     def emit(self, event: Mapping[str, object]) -> Event:
-        """Assign ``seq``/``ts`` and append the record (append-only, UTF-8)."""
+        """Assign ``seq``/``ts`` and append the record (append-only, UTF-8).
+
+        An event type outside ``EventType`` (SPEC §9) is recorded as ``log`` with the
+        offending name kept in the payload, rather than raised. Telemetry must not
+        decide whether work stands: a live ``find`` step gathered 19 sources, passed
+        its gate, and was then failed by an adapter warning emitted with a type the
+        enum did not list. The record still shows what happened and to whom.
+        """
         self._seq += 1
         raw_payload = event.get("payload")
         payload = dict(raw_payload) if isinstance(raw_payload, Mapping) else {}
         raw_step = event.get("step_id")
+        name = str(event["type"])
+        try:
+            etype = EventType(name)
+        except ValueError:
+            etype = EventType.log
+            payload["unknown_event_type"] = name
         record = Event(
             seq=self._seq,
             ts=self._clock(),
-            type=EventType(str(event["type"])),
+            type=etype,
             step_id=str(raw_step) if raw_step is not None else None,
             payload=payload,
         )

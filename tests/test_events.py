@@ -91,3 +91,25 @@ class TestDefaults:
 
         assert record.payload == {}
         assert record.step_id is None
+
+
+def test_an_unknown_event_type_is_logged_not_raised(tmp_path: Path) -> None:
+    """Telemetry must never fail work that already passed its gate (SPEC §9).
+
+    A live ``find`` step gathered 19 sources and passed its gate, then died on the
+    adapter's own warning: ``'warning' is not a valid EventType``.
+    """
+    from refract.events import EventWriter
+    from refract.models.ledger import EventType
+
+    writer = EventWriter(tmp_path, clock=lambda: "T0")
+    record = writer.emit(
+        {"type": "warning", "step_id": "find", "payload": {"message": "server down"}}
+    )
+    assert record.type is EventType.log
+    assert record.payload["unknown_event_type"] == "warning"
+    assert record.payload["message"] == "server down"  # nothing is dropped
+    assert record.step_id == "find"
+
+    # a known type still round-trips unchanged
+    assert writer.emit({"type": "heartbeat"}).type is EventType.heartbeat

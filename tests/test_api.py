@@ -762,7 +762,7 @@ def test_graph_exposes_meta_node_internals(client: TestClient, tmp_path: Path) -
     choose = nodes["choose"]
     assert [b["role"] for b in choose["blocks"]] == ["selector"]
     # what the select is choosing between: the candidate producer's map_over models
-    assert choose["candidate_models"] == ["kimi/kimi-k3", "openai/gpt-5.6"]
+    assert choose["candidate_models"] == ["claude/sonnet", "claude/opus"]
     assert choose["facts"]["fallback"] == "first_ok"
 
     # a winner_model binding stays a binding, not a fake provider

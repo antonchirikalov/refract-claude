@@ -39,3 +39,39 @@ types:
   illustration@v1: { kind: dir }
   # Publish confirmation: page URL/id/version, attachment counts (spectra confluence_publisher).
   publication@v1: { kind: file, format: json }
+  # Academic reading note on one source, carrying the DSTU 8302:2015 bibliographic
+  # data the report's source list is built from.
+  study_note@v1: { kind: file, format: json, schema: study_note.schema.json }
+  # Subject-matter analysis over the whole set of study notes, organised by the
+  # brief's aspects. The stage a live run did without: with reading feeding prose
+  # directly, nobody compared the sources, so the only thing left to write about
+  # at length was the sources themselves — 45 pages characterising the shelf.
+  analysis@v1: { kind: file, format: json, schema: analysis.schema.json }
+  # Scientific-analytical report (Ukrainian). The volume requirement is a client
+  # term, not a style preference, so it is enforced mechanically rather than left
+  # to the critic to argue about: 45 pages x 1800 characters = 81 000.
+  # The genre, not one assignment: a sourced analytic report. Headings are matched
+  # as alternations so the type is not tied to a single language — the document's
+  # own language comes from the brief and the agent's prompt, not from here.
+  analytic_report@v1:
+    kind: file
+    format: markdown
+    rules:
+      - { rule: regex, pattern: '^#{1,2}\s*(ВСТУП|ВВЕДЕНИЕ|INTRODUCTION)', flags: "mi" }
+      - { rule: regex, pattern: '^#{1,2}\s*(ВИСНОВКИ|ВЫВОДЫ|CONCLUSIONS?)', flags: "mi" }
+      # No source list means no verifiable claims; the critic then judges whether
+      # the entries are real and whether the in-text references match them.
+      - rule: regex
+        pattern: '^#{1,2}\s*(СПИСОК ВИКОРИСТАНИХ ДЖЕРЕЛ|СПИСОК ЛИТЕРАТУРЫ|REFERENCES|BIBLIOGRAPHY)'
+        flags: "mi"
+      # A reference to a source that is not in the list, and an entry nobody cites,
+      # are both countable — settled here so no review round is spent on them. The
+      # 40-character floor is what killed "Kurt v. Turkey (1998)." in a live run:
+      # a title alone leads no reader back to the source.
+      - rule: citation_closure
+        list_heading: СПИСОК ВИКОРИСТАНИХ ДЖЕРЕЛ|СПИСОК ЛИТЕРАТУРЫ|REFERENCES|BIBLIOGRAPHY
+        min_entry_chars: 40
+      # Genre floor only — a report is not a memo. The volume a given assignment
+      # demands is the brief's business, and the engine cannot yet enforce a
+      # per-project number (see min_length note below).
+      - { rule: min_length, value: 20000 }

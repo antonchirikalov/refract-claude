@@ -12,6 +12,7 @@ runs after materialization (§10.1). Only relative paths appear (I1).
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,7 +20,13 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from refract.artifacts import artifact_filename
 from refract.models.agent import AgentSpec, Port
-from refract.models.types import MinLengthRule, RegexRule, TypeKind
+from refract.models.types import (
+    CitationClosureRule,
+    MinLengthRule,
+    RegexRule,
+    Rule,
+    TypeKind,
+)
 from refract.registry import ArtifactRegistry, parse_type_ref
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
@@ -52,12 +59,13 @@ def build_task_prompt(
     workdir: Path | str,
     revision: RevisionContext | None = None,
     gate_feedback: str | None = None,
+    gate_rules: Sequence[Rule] = (),
 ) -> str:
     """Assemble the task prompt (SPEC §11 items 2–4) for one step."""
     workdir = Path(workdir)
     sections = [
         _render_inputs(agent, registry, workdir),
-        _render_outputs(agent, registry),
+        _render_outputs(agent, registry, gate_rules),
     ]
     if revision is not None:
         sections.append(
@@ -202,28 +210,35 @@ def _inline_element(slug_dir: Path) -> str | None:
 # --- outputs (SPEC §11 item 3) ---------------------------------------------
 
 
-def _render_outputs(agent: AgentSpec, registry: ArtifactRegistry) -> str:
+def _render_outputs(
+    agent: AgentSpec, registry: ArtifactRegistry, gate_rules: Sequence[Rule] = ()
+) -> str:
     outputs = []
-    for port in agent.produces:
+    for i, port in enumerate(agent.produces):
         rtype = registry.get(port.type)
         rel = (
             f"output/{artifact_filename(port.port, rtype)}"
             if rtype
             else f"output/{port.port}"
         )
+        # node-level rules apply to the primary port; the agent has to be told what
+        # it is actually held to, and that text is generated, never hand-written (I5)
+        extra = gate_rules if i == 0 else ()
         outputs.append(
             {
                 "port": port.port,
                 "type": port.type,
                 "optional": port.optional,
                 "path": rel,
-                "summary": _schema_summary(registry, port.type),
+                "summary": _schema_summary(registry, port.type, extra),
             }
         )
     return _env.get_template("outputs.md.j2").render(outputs=outputs)
 
 
-def _schema_summary(registry: ArtifactRegistry, type_name: str) -> str:
+def _schema_summary(
+    registry: ArtifactRegistry, type_name: str, extra_rules: Sequence[Rule] = ()
+) -> str:
     rtype = registry.get(type_name)
     if rtype is None:
         return ""
@@ -239,11 +254,22 @@ def _schema_summary(registry: ArtifactRegistry, type_name: str) -> str:
             + json.dumps(rtype.schema, indent=2, ensure_ascii=False)
             + "\n```"
         )
-    for rule in rtype.rules:
+    for rule in [*rtype.rules, *extra_rules]:
         if isinstance(rule, RegexRule):
             lines.append(f"Must match regex `{rule.pattern}`.")
         elif isinstance(rule, MinLengthRule):
             lines.append(f"At least {rule.value} characters.")
+        elif isinstance(rule, CitationClosureRule):
+            lines.append(
+                f"Every `[n]` reference in the text must resolve to an entry of the "
+                f"numbered list under `{rule.list_heading}`, every entry must be cited "
+                f"at least once, and the list must be numbered 1..N without gaps."
+            )
+            if rule.min_entry_chars:
+                lines.append(
+                    f"Each entry must be at least {rule.min_entry_chars} characters — "
+                    f"enough to identify the source, not a stub."
+                )
     return " ".join(lines)
 
 

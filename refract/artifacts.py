@@ -18,10 +18,29 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from refract.models.types import ItemInfo, TypeKind
-from refract.registry import ResolvedType
+from refract.models.types import ItemInfo, Rule, TypeKind
+from refract.registry import ResolvedType, apply_rules
 
 # --- the single linking helper (SPEC §10; Windows symlink fallback) --------
+
+
+def long_path(path: Path | str) -> str:
+    """A form of ``path`` the Windows APIs accept past the 260-character limit.
+
+    Run trees nest deeply by design — ``runs/<run-id>/steps/<node>/<slug>/output/…``
+    — and the slug and filename at the bottom come from an agent, not from us. A live
+    discover node assembled a collection whose ``<slug>/<file>`` pair was 120
+    characters on its own and crashed in ``shutil.copyfile`` with a bare
+    ``FileNotFoundError``, which reads as "the agent produced nothing" rather than
+    "the path was too long". The ``\\\\?\\`` prefix lifts the limit; it demands a
+    fully-qualified path with no forward slashes and no ``..``, hence ``resolve()``.
+
+    A no-op off Windows and for paths already prefixed.
+    """
+    text = os.fspath(path)
+    if os.name != "nt" or text.startswith("\\\\?\\"):
+        return text
+    return "\\\\?\\" + os.fspath(Path(text).resolve())
 
 
 def link_or_copy(src: Path | str, dst: Path | str) -> None:
@@ -39,9 +58,9 @@ def link_or_copy(src: Path | str, dst: Path | str) -> None:
     except (OSError, NotImplementedError):
         pass
     if src.is_dir():
-        shutil.copytree(src, dst)
+        shutil.copytree(long_path(src), long_path(dst))
     else:
-        shutil.copy2(src, dst)
+        shutil.copy2(long_path(src), long_path(dst))
 
 
 def make_tree_readonly(path: Path | str) -> None:
@@ -147,6 +166,8 @@ class GatePort:
     port: str
     rtype: ResolvedType
     optional: bool = False
+    # node-level tightening on top of the type's own rules (SPEC §8 ``gate_rules``)
+    extra_rules: tuple[Rule, ...] = ()
 
 
 class PortGateResult(BaseModel):
@@ -189,6 +210,7 @@ def check_port(output_dir: Path | str, spec: GatePort) -> PortGateResult:
                 )
             problems.extend(spec.rtype.validate_json(data))
         problems.extend(spec.rtype.check_rules(text))
+        problems.extend(apply_rules(spec.extra_rules, text))
     else:
         # dir/any: existence alone is too weak — an agent that produced nothing
         # would still pass (SPEC §10.2 > CHANGED). Require real content.

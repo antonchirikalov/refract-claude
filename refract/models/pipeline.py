@@ -13,6 +13,8 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, field_validator
 
+from refract.models.types import Rule
+
 _ID_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
 
 
@@ -89,6 +91,7 @@ class BodyBlock(BaseModel):
     model: str | None = None
     inputs: dict[str, str] = Field(default_factory=dict)
     params: SubBlockParams | None = None
+    gate_rules: list[Rule] = Field(default_factory=list)
 
 
 class CriticBlock(BaseModel):
@@ -100,6 +103,7 @@ class CriticBlock(BaseModel):
     model: str | None = None
     inputs: dict[str, str] = Field(default_factory=dict)
     params: SubBlockParams | None = None
+    gate_rules: list[Rule] = Field(default_factory=list)
 
 
 class SelectorBlock(BaseModel):
@@ -132,6 +136,10 @@ class AgentNode(_NodeBase):
     map: str | None = None
     map_over: MapOver | None = None
     params: AgentParams = Field(default_factory=AgentParams)
+    # Extra rules on this node's primary output, on top of the artifact type's own
+    # (SPEC §8). Lets a project state its own terms — "this report runs to 45
+    # pages" — without pushing one assignment's number into a shared library type.
+    gate_rules: list[Rule] = Field(default_factory=list)
 
 
 class LoopNode(_NodeBase):

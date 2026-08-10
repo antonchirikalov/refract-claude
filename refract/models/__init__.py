@@ -50,6 +50,7 @@ from refract.models.pipeline import (
 from refract.models.types import (
     ArtifactTypeDef,
     ArtifactTypesFile,
+    CitationClosureRule,
     CollectionItem,
     CollectionManifest,
     CollectionStats,
@@ -70,6 +71,7 @@ __all__ = [
     # types / registry format
     "ArtifactTypeDef",
     "ArtifactTypesFile",
+    "CitationClosureRule",
     "CollectionItem",
     "CollectionManifest",
     "CollectionStats",

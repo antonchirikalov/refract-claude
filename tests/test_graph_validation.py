@@ -1140,3 +1140,67 @@ nodes:
         ctx = make_ctx(tmp_path, agents={})
         _order, errors = validate_pipeline(pipeline, ctx)
         assert Code.E_UNKNOWN_NODE_REF not in _codes(errors)
+
+
+class TestGateRules:
+    """SPEC §8/§5.1: a node may tighten its own gate, but only where rules can run."""
+
+    _AGENTS = {
+        "writer@1": agent_spec(
+            "writer",
+            consumes=[{"port": "brief", "type": "brief@v1"}],
+            produces=[{"port": "doc", "type": "requirements@v1"}],
+        ),
+        "finder@1": agent_spec(
+            "finder",
+            consumes=[{"port": "brief", "type": "brief@v1"}],
+            produces=[{"port": "found", "type": "found_sources@v1"}],
+        ),
+    }
+
+    def _yaml(self, agent: str) -> str:
+        return f"""
+version: "0.1"
+name: p
+input_mode: brief
+nodes:
+  - id: brief
+    type: builtin/brief
+  - id: write
+    type: agent
+    agent: {agent}
+    inputs: {{ brief: brief.brief }}
+    gate_rules:
+      - {{ rule: min_length, value: 81000 }}
+"""
+
+    def test_rules_on_a_file_port_are_accepted(self, tmp_path: Path) -> None:
+        ctx = make_ctx(tmp_path, agents=self._AGENTS)
+        _order, errors = validate_pipeline(_pipeline(self._yaml("writer@1")), ctx)
+        assert Code.E_GATE_RULES_SHAPE not in _codes(errors)
+
+    def test_rules_on_a_dir_port_yield_e_gate_rules_shape(self, tmp_path: Path) -> None:
+        """Nothing to read on a dir artifact — the rule would promise a guarantee it
+        could never check."""
+        ctx = make_ctx(tmp_path, agents=self._AGENTS)
+        _order, errors = validate_pipeline(_pipeline(self._yaml("finder@1")), ctx)
+        assert Code.E_GATE_RULES_SHAPE in _codes(errors)
+
+    def test_no_rules_means_no_complaint(self, tmp_path: Path) -> None:
+        pipeline = _pipeline(
+            """
+version: "0.1"
+name: p
+input_mode: brief
+nodes:
+  - id: brief
+    type: builtin/brief
+  - id: write
+    type: agent
+    agent: writer@1
+    inputs: { brief: brief.brief }
+"""
+        )
+        ctx = make_ctx(tmp_path, agents=self._AGENTS)
+        _order, errors = validate_pipeline(pipeline, ctx)
+        assert Code.E_GATE_RULES_SHAPE not in _codes(errors)

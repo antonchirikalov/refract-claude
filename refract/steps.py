@@ -16,7 +16,7 @@ import asyncio
 import json
 import random
 import shutil
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +26,7 @@ from refract.artifacts import (
     GateReport,
     artifact_path,
     link_or_copy,
+    long_path,
     materialize_collection,
     materialize_dir_or_any,
     materialize_file,
@@ -35,7 +36,7 @@ from refract.artifacts import (
 )
 from refract.models.agent import AgentSpec
 from refract.models.ledger import StepOutcome, StepState, StepStatus
-from refract.models.types import ItemInfo
+from refract.models.types import ItemInfo, Rule
 from refract.prompt import RevisionContext, build_task_prompt
 from refract.registry import ArtifactRegistry, ResolvedType
 from refract.runtime.base import AgentRuntime, EventCallback, StepResult, StepSpec
@@ -105,6 +106,9 @@ class AgentStepPlan:
     gate_retries: int = 2
     infra_retries: int = 2
     revision: RevisionContext | None = None
+    # Node-level tightening of the primary output's gate (SPEC §8 ``gate_rules``),
+    # checked alongside the artifact type's own rules.
+    gate_rules: list[Rule] = field(default_factory=list)
     # Extra semantic validation of ``output/`` beyond the schema gate; returns a
     # list of problems (empty = pass). Feeds the same gate-retry loop. Used by
     # select to require ``selection.winner`` ∈ ok-slugs (SPEC §10.3).
@@ -124,12 +128,24 @@ def _backoff_delay(infra_attempt: int) -> float:
     return float(base * (0.5 + random.random() * 0.5))
 
 
-def _gate_ports(agent: AgentSpec, registry: ArtifactRegistry) -> list[GatePort]:
+def _gate_ports(
+    agent: AgentSpec,
+    registry: ArtifactRegistry,
+    gate_rules: Sequence[Rule] = (),
+) -> list[GatePort]:
+    """Ports to validate; ``gate_rules`` tighten the PRIMARY one (SPEC §8/§10.2)."""
     ports: list[GatePort] = []
-    for p in agent.produces:
+    for i, p in enumerate(agent.produces):
         rtype = registry.get(p.type)
         if rtype is not None:
-            ports.append(GatePort(port=p.port, rtype=rtype, optional=p.optional))
+            ports.append(
+                GatePort(
+                    port=p.port,
+                    rtype=rtype,
+                    optional=p.optional,
+                    extra_rules=tuple(gate_rules) if i == 0 else (),
+                )
+            )
     return ports
 
 
@@ -171,6 +187,20 @@ def _format_feedback(report: GateReport) -> str:
 
 
 def _materialize(inputs: list[InputSpec], input_root: Path) -> None:
+    """Lay out ``input/<port>/`` for a step (SPEC §10.1).
+
+    Rebuilt from scratch each time. Materialization is not additive: ``link_or_copy``
+    requires a destination that does not exist yet, so a second pass over a workdir
+    that already has ``input/`` raised ``FileExistsError`` — which meant every
+    ``resume --retry-failed`` of a non-map step died on its own leftovers instead of
+    retrying. Inputs are immutable, so rebuilding produces the same tree.
+    """
+    if input_root.exists():
+        for entry in input_root.iterdir():
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(long_path(entry), ignore_errors=True)
+            else:
+                entry.unlink(missing_ok=True)
     for spec in inputs:
         if isinstance(spec, FileInput):
             materialize_file(spec.src, input_root, spec.port, spec.rtype)
@@ -254,7 +284,7 @@ async def execute_agent_step(
     output_dir.mkdir(parents=True, exist_ok=True)
     _materialize(plan.inputs, input_root)  # inputs are immutable across gate retries
 
-    gate_ports = _gate_ports(plan.agent, plan.registry)
+    gate_ports = _gate_ports(plan.agent, plan.registry, plan.gate_rules)
     system_prompt = _system_prompt(plan.agent_dir)
 
     def finish(
@@ -372,6 +402,7 @@ async def execute_agent_step(
             workdir=workdir,
             revision=plan.revision,
             gate_feedback=gate_feedback,
+            gate_rules=plan.gate_rules,
         )
         if hitl_context is not None:
             task_prompt = f"{task_prompt}\n{hitl_context}\n"

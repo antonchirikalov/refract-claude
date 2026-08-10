@@ -30,7 +30,10 @@ nodes:
     type: agent
     agent: solution_designer@1
     inputs: { requirements: refine.doc }
-    map_over: { models: ["kimi/kimi-k3", "openai/gpt-5.6"] }
+    # the contest runs on what this fork can actually reach: the Claude Code CLI
+    # serves the subscription's models, and `model_alias()` hands the CLI whatever
+    # follows the provider — a non-claude provider here ships a template that cannot run
+    map_over: { models: ["claude/sonnet", "claude/opus"] }
     params: { workers: 2 }
 
   - id: choose

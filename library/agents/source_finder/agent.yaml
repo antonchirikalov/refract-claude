@@ -10,6 +10,11 @@ consumes:
   - { port: brief, type: brief@v1 }
 produces:
   - { port: found, type: found_sources@v1 }
-needs: [read, edit, webfetch, "mcp:tavily-remote"]
+# pdf-reader is not an extra: official statistics, court-practice digests and agency
+# reports are published as PDF, and a finder that cannot open one records the aspect as
+# uncovered while looking at the document that covers it. A live run did exactly that
+# twice — the two aspects it gave up on are the two the report then padded with remarks
+# about its own source base.
+needs: [read, edit, webfetch, "mcp:tavily-remote", "mcp:pdf-reader"]
 defaults:
   timeout_s: 1800

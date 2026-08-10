@@ -11,6 +11,7 @@ Pure helpers here; the scheduler drives them (it owns the ledger + events).
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -83,15 +84,38 @@ def map_reuse_index(reuse_run_dir: Path, node_id: str, out_port: str) -> dict[st
 def builtin_signature(output_base: Path, port: str) -> str:
     """A stable content signature of a builtin's output port for change detection.
 
-    For a collection port it is the sorted ``slug:source_hash`` lines; otherwise
-    the empty string (builtins without a manifest are treated as always-changed).
+    For a collection port it is the sorted ``slug:source_hash`` lines; for a plain
+    file or directory output, a hash of the content. Empty string only when the port
+    produced nothing recognisable — and an empty signature counts as "changed", so
+    the fallback is safe but expensive.
+
+    Only collections were understood at first, which quietly disabled reuse for every
+    brief-driven pipeline: ``builtin/brief`` writes ``<port>.md`` and has no manifest,
+    so its signature was always empty, it always counted as changed, and ``rerun
+    --from`` re-searched and re-extracted everything downstream on every run.
     """
     manifest = output_base / port / "_collection.json"
-    if not manifest.exists():
-        return ""
-    data = json.loads(manifest.read_text("utf-8"))
-    lines = sorted(
-        f"{item.get('slug')}:{item.get('source_hash')}:{item.get('status')}"
-        for item in data.get("items", [])
+    if manifest.exists():
+        data = json.loads(manifest.read_text("utf-8"))
+        lines = sorted(
+            f"{item.get('slug')}:{item.get('source_hash')}:{item.get('status')}"
+            for item in data.get("items", [])
+        )
+        return "\n".join(lines)
+
+    # a file artifact: <port>.<ext> written next to the port dir (SPEC §10.4)
+    files = (
+        sorted(p for p in output_base.glob(f"{port}.*") if p.is_file())
+        if output_base.is_dir()
+        else []
     )
-    return "\n".join(lines)
+    port_dir = output_base / port
+    if port_dir.is_dir():
+        files += sorted(p for p in port_dir.rglob("*") if p.is_file())
+    if not files:
+        return ""
+    digest = hashlib.sha256()
+    for path in files:
+        digest.update(path.name.encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()

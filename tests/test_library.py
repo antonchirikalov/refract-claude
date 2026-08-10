@@ -99,3 +99,21 @@ def test_extract_pipeline_validates(tmp_path: Path) -> None:
     graph = load_pipeline(pipeline, ctx)
     assert graph.ok, [(e.code.value, e.node_id, e.message) for e in graph.errors]
     assert graph.order == ["scan", "extract", "write"]
+
+
+def test_shipped_prompts_and_specs_are_english() -> None:
+    """Prompts are English even when the document they produce is not (§6).
+
+    An agent's output language comes from the brief; hardcoding it in the package
+    makes the agent single-assignment. A live run shipped four agents written in
+    Ukrainian, which read as if the archetype only did Ukrainian legal research.
+    """
+    import re
+
+    cyrillic = re.compile(r"[А-Яа-яЁёІіЇїЄєҐґ]")
+    offenders = []
+    for path in sorted((LIBRARY / "agents").glob("*/*.md")):
+        hits = cyrillic.findall(path.read_text(encoding="utf-8"))
+        if hits:
+            offenders.append((path.parent.name, path.name, len(hits)))
+    assert offenders == [], offenders

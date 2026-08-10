@@ -267,6 +267,25 @@ class TestFailureModes:
 
 
 class TestAssemblyDirectly:
+    def test_open_questions_memo_is_metadata_not_a_source(self, tmp_path: Path) -> None:
+        """The finder's memo about what it could not reach is not source material.
+
+        A live run assembled it as source #12: it cost a study note of its own and
+        then appeared in the report's bibliography as a citable work.
+        """
+        found = tmp_path / "found"
+        found.mkdir()
+        (found / "a.md").write_text("A", encoding="utf-8")
+        (found / "open-questions.md").write_text("403 on gp.gov.ua", encoding="utf-8")
+        out = tmp_path / "out"
+
+        manifest = assemble_discovered_collection(found, out)
+
+        assert [i.source for i in manifest.items] == ["a.md"]
+        assert manifest.stats.total == 1
+        # kept beside the manifest — it is worth reading, just not as a source
+        assert (out / "open-questions.md").is_file()
+
     def test_assembly_is_idempotent(self, tmp_path: Path) -> None:
         # SPEC §20.2: rebuilt from scratch, so resume re-assembly is safe.
         found = tmp_path / "found"
@@ -382,3 +401,36 @@ nodes:
 
         assert deps["find"] == {"brief"}
         assert deps["extract"] == {"find"}
+
+
+def test_assembly_survives_a_path_past_the_windows_limit(tmp_path: Path) -> None:
+    """Deep run tree + agent-chosen names must not crash assembly (I-Windows).
+
+    The live failure: ``_out/sources/<63-char slug>/<63-char file>`` under a run
+    directory, and ``shutil.copyfile`` raising ``FileNotFoundError`` — indistinguishable,
+    from the CLI output, from a discover agent that wrote nothing.
+    """
+    from refract.artifacts import long_path
+    from refract.scheduler import assemble_discovered_collection
+
+    # a realistically deep tree, as a run directory is
+    deep = tmp_path
+    for part in ("terror-report", "runs", "run_20260731_145129", "steps", "find"):
+        deep = deep / part
+    found = deep / "main" / "output" / "found"
+    found.mkdir(parents=True)
+    name = "rada-yevropy-konventsiya-poperedzhennya-teroryzmu-ratyfikatsiya-ukrainy.md"
+    (found / name).write_text("# A source\nSubstance.\n", encoding="utf-8")
+    (found / "_index.json").write_text('[{"file": "x"}]', encoding="utf-8")
+
+    manifest = assemble_discovered_collection(found, deep / "_out" / "sources")
+
+    assert manifest.stats.ok == 1
+    item = manifest.items[0]
+    assert item.source == name  # the original name is preserved in the manifest
+    # inside the item the file is named after the slug: this directory is copied into
+    # every downstream step's input/, so the agent's own long name cannot ride along
+    copied = deep / "_out" / "sources" / item.slug / f"{item.slug}.md"
+    assert Path(long_path(copied)).read_text(encoding="utf-8").startswith("# A source")
+    # the agent's index is meta, kept beside the manifest rather than as an item
+    assert (deep / "_out" / "sources" / "_index.json").exists()

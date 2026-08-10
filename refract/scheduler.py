@@ -21,7 +21,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from refract.artifacts import artifact_path, link_or_copy
+from refract.artifacts import artifact_path, link_or_copy, long_path
 from refract.builtins import BUILTINS
 from refract.builtins.scanner import source_hash as source_content_hash
 from refract.events import EventWriter, utcnow_iso
@@ -223,6 +223,7 @@ def _agent_plan(
         inputs=_build_inputs(node, run_dir, agents, registry, nodes),
         timeout_s=timeout,
         gate_retries=node.params.gate_retries,
+        gate_rules=node.gate_rules,
         infra_retries=node.params.infra_retries,
     )
 
@@ -262,14 +263,22 @@ def _discover_plan(
     )
 
 
+# A discover agent writes about its own work as well as about the subject: the
+# url/title map, and the memo naming what it could not reach. Neither is a source.
+# A live run showed the cost of missing the second one: the memo became source #12,
+# spent an LLM call on its own study note, and turned up in the report's
+# bibliography as a citable work (SPEC §20.1).
+_DISCOVER_META = ("_index.json", "open-questions.md")
+
+
 def assemble_discovered_collection(
     found_dir: Path, out_dir: Path
 ) -> CollectionManifest:
     """Turn a discover agent's output dir into ``collection<source@v1>`` (§20.2).
 
     One element per top-level entry, ``slug``/``source_hash`` by the scanner's rules
-    (§13) so both collection producers hash identically. ``_index.json`` (the agent's
-    optional url/title map) is not a source — it is copied next to the manifest.
+    (§13) so both collection producers hash identically. The agent's own meta files
+    (``_DISCOVER_META``) are not sources — they are copied next to the manifest.
     Idempotent: the output dir is rebuilt from scratch, so resume re-assembly is safe.
     """
     if out_dir.exists():
@@ -281,16 +290,24 @@ def assemble_discovered_collection(
     ok = 0
     entries = sorted(found_dir.iterdir()) if found_dir.is_dir() else []
     for entry in entries:
-        if entry.name.startswith(".") or entry.name == "_index.json":
+        if entry.name.startswith(".") or entry.name in _DISCOVER_META:
             continue
         slug = unique_slug(slugify(entry.name), taken)
         taken.add(slug)
         slug_dir = out_dir / slug
         slug_dir.mkdir(parents=True, exist_ok=True)
         if entry.is_dir():
-            shutil.copytree(entry, slug_dir, dirs_exist_ok=True)
+            shutil.copytree(long_path(entry), long_path(slug_dir), dirs_exist_ok=True)
         else:
-            shutil.copyfile(entry, slug_dir / entry.name)
+            # The file inside the item dir is named after the slug, not after the
+            # agent's own filename: the item dir is materialized again into every
+            # downstream step (`input/<port>/<slug>/<file>`), so an agent-chosen name
+            # is the tail that pushes a run path past the Windows limit. The original
+            # name is not lost — the manifest keeps it in `source`. long_path covers
+            # the copy itself, which a live run crashed on with a bare
+            # FileNotFoundError, two steps of reading away from the real cause.
+            inner = slug_dir / f"{slug}{entry.suffix}"
+            shutil.copyfile(long_path(entry), long_path(inner))
         items.append(
             CollectionItem(
                 slug=slug,
@@ -302,9 +319,10 @@ def assemble_discovered_collection(
         )
         ok += 1
 
-    index = found_dir / "_index.json"
-    if index.is_file():
-        shutil.copyfile(index, out_dir / "_index.json")
+    for name in _DISCOVER_META:
+        meta = found_dir / name
+        if meta.is_file():
+            shutil.copyfile(long_path(meta), long_path(out_dir / name))
 
     manifest = CollectionManifest(
         type=make_collection("source@v1"),
@@ -844,6 +862,7 @@ async def run_pipeline(
                 inputs=[item_input, *shared],
                 timeout_s=node.params.timeout_s or agent.defaults.timeout_s,
                 gate_retries=node.params.gate_retries,
+                gate_rules=node.gate_rules,
                 infra_retries=node.params.infra_retries,
             )
             async with workers_sem, semaphore_for(model):
@@ -911,6 +930,7 @@ async def run_pipeline(
                 inputs=list(shared),
                 timeout_s=node.params.timeout_s or agent.defaults.timeout_s,
                 gate_retries=node.params.gate_retries,
+                gate_rules=node.gate_rules,
                 infra_retries=node.params.infra_retries,
             )
             async with workers_sem, semaphore_for(model):

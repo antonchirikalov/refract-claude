@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from pathlib import Path
 
 import yaml
@@ -20,6 +21,7 @@ from refract.models.errors import Code, RegistryError
 from refract.models.types import (
     ArtifactTypeDef,
     ArtifactTypesFile,
+    CitationClosureRule,
     MinLengthRule,
     RegexRule,
     Rule,
@@ -102,9 +104,27 @@ def check_edge(source_type: str, target_type: str, *, via_map: bool) -> Code | N
 # --- slugify (single implementation, SPEC §5) ------------------------------
 
 
+# A slug becomes a directory name inside an already-deep run tree, and it is derived
+# from a filename an agent chose — which in a live run ran to 63 characters and, paired
+# with the file of the same name inside it, overran the Windows path limit. Capping keeps
+# slugs legible as well: past this length they stop being names and become sentences.
+# CHANGED (2026-07-31, SPEC §5): slugify truncates.
+MAX_SLUG_CHARS = 48
+
+
 def slugify(s: str) -> str:
-    """lowercase; ``[^a-z0-9]+ → -``; trim leading/trailing ``-`` (SPEC §5)."""
-    return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
+    """lowercase; ``[^a-z0-9]+ → -``; trim leading/trailing ``-`` (SPEC §5).
+
+    Truncated to ``MAX_SLUG_CHARS`` on a ``-`` boundary where there is one, so the
+    result stays readable rather than ending mid-word. Collisions introduced by
+    truncation are resolved by ``unique_slug`` exactly like any other collision.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
+    if len(slug) <= MAX_SLUG_CHARS:
+        return slug
+    cut = slug[:MAX_SLUG_CHARS]
+    head, sep, _ = cut.rpartition("-")
+    return (head if sep and len(head) >= MAX_SLUG_CHARS // 2 else cut).strip("-")
 
 
 def unique_slug(base: str, taken: set[str]) -> str:
@@ -121,6 +141,96 @@ def model_slug(model: str) -> str:
     """``slugify(provider) + "_" + slugify(model_id)`` (SPEC §5), e.g. kimi_kimi-k3."""
     provider, _, model_id = model.partition("/")
     return f"{slugify(provider)}_{slugify(model_id)}"
+
+
+# --- rules -----------------------------------------------------------------
+
+
+def apply_rules(rules: Sequence[Rule], text: str) -> list[str]:
+    """Rule-failure messages for this text; empty means every rule passes (§5).
+
+    A free function, not only a method of the type: a node may tighten the gate of
+    its own output (``gate_rules``, SPEC §8), and those rules are checked with the
+    very same code as the type's own.
+    """
+    failures: list[str] = []
+    for rule in rules:
+        if isinstance(rule, RegexRule):
+            flags = 0
+            for ch in rule.flags or "":
+                flags |= _REGEX_FLAGS.get(ch, 0)
+            if re.search(rule.pattern, text, flags) is None:
+                failures.append(f"regex {rule.pattern!r} not found")
+        elif isinstance(rule, MinLengthRule):
+            if len(text) < rule.value:
+                failures.append(f"min_length {rule.value} not met (got {len(text)})")
+        elif isinstance(rule, CitationClosureRule):
+            failures.extend(check_citation_closure(text, rule))
+    return failures
+
+
+# --- citation closure ------------------------------------------------------
+
+
+def _cited_numbers(body: str) -> set[int]:
+    """Source numbers referenced in the prose: ``[12]``, ``[12, с. 45]``, ``[3; 5]``."""
+    cited: set[int] = set()
+    for group in re.findall(r"\[([^\[\]]{1,120})\]", body):
+        for chunk in re.split(r"[;,]", group):
+            chunk = chunk.strip()
+            if chunk.isdigit():
+                cited.add(int(chunk))
+    return cited
+
+
+def check_citation_closure(text: str, rule: CitationClosureRule) -> list[str]:
+    """Every reference resolves, every entry is used, no gaps, no stub entries.
+
+    A fabricated reference and an entry nobody cites are both countable defects;
+    catching them here means the critic never has to spend a round on them.
+    """
+    parts = re.split(rf"^#{{1,3}}\s*(?:{rule.list_heading}).*$", text, flags=re.M)
+    if len(parts) < 2:
+        return [f"citation_closure: no source list under {rule.list_heading!r}"]
+
+    body, listing = parts[0], parts[-1]
+    entries = re.findall(r"^\s*(\d+)[.)]\s+(.+?)\s*$", listing, flags=re.M)
+    if not entries:
+        return [f"citation_closure: source list under {rule.list_heading!r} is empty"]
+
+    failures: list[str] = []
+    numbers = [int(n) for n, _ in entries]
+    listed = set(numbers)
+    if len(numbers) != len(listed):
+        dupes = sorted({n for n in numbers if numbers.count(n) > 1})
+        failures.append(f"citation_closure: duplicate source numbers {dupes}")
+    expected = set(range(1, len(numbers) + 1))
+    if listed != expected:
+        failures.append(
+            "citation_closure: source list is not numbered 1..N without gaps "
+            f"(got {sorted(listed)})"
+        )
+
+    cited = _cited_numbers(body)
+    dangling = sorted(cited - listed)
+    if dangling:
+        failures.append(
+            f"citation_closure: cited in the text but absent from the list: {dangling}"
+        )
+    unused = sorted(listed - cited)
+    if unused:
+        failures.append(
+            f"citation_closure: listed but never cited in the text: {unused}"
+        )
+
+    if rule.min_entry_chars:
+        stubs = [n for n, entry in entries if len(entry.strip()) < rule.min_entry_chars]
+        if stubs:
+            failures.append(
+                f"citation_closure: entries too short to identify the source "
+                f"(under {rule.min_entry_chars} chars): {sorted(stubs)}"
+            )
+    return failures
 
 
 # --- resolved type ---------------------------------------------------------
@@ -161,20 +271,7 @@ class ResolvedType:
 
     def check_rules(self, text: str) -> list[str]:
         """Return a list of rule-failure messages; empty means all rules pass (§5)."""
-        failures: list[str] = []
-        for rule in self.rules:
-            if isinstance(rule, RegexRule):
-                flags = 0
-                for ch in rule.flags or "":
-                    flags |= _REGEX_FLAGS.get(ch, 0)
-                if re.search(rule.pattern, text, flags) is None:
-                    failures.append(f"regex {rule.pattern!r} not found")
-            elif isinstance(rule, MinLengthRule):
-                if len(text) < rule.value:
-                    failures.append(
-                        f"min_length {rule.value} not met (got {len(text)})"
-                    )
-        return failures
+        return apply_rules(self.rules, text)
 
     def validate_json(self, data: object) -> list[str]:
         """Return JSON-schema error messages; empty means valid (SPEC §10.2 gate)."""

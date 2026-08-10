@@ -10,6 +10,7 @@ parsing and the transient-failure classification.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -21,10 +22,14 @@ from refract.runtime.claude_code import (
     ClaudeCodeRuntime,
     TurnTrace,
     allowed_tools,
+    denied_tools,
+    failed_mcp_servers,
     is_transient,
     mcp_config,
     model_alias,
     parse_stream_line,
+    unknown_cli_tools,
+    unused_mcp_servers,
 )
 
 MCP = McpFile.model_validate(
@@ -41,7 +46,9 @@ MCP = McpFile.model_validate(
 )
 
 
-def _spec(tmp_path: Path, *, needs: list[str], model: str = "claude/sonnet") -> StepSpec:
+def _spec(
+    tmp_path: Path, *, needs: list[str], model: str = "claude/sonnet"
+) -> StepSpec:
     return StepSpec(
         step_id="extract:rfp-md",
         agent_dir=tmp_path / "agent",
@@ -105,53 +112,190 @@ class TestMcpConfig:
         assert mcp_config(["read", "edit"], MCP)["mcpServers"] == {}
 
 
+def _cmd(tmp_path: Path, *, needs: list[str], mcp: Path | None = None) -> list[str]:
+    return _runtime().build_command(
+        _spec(tmp_path, needs=needs), mcp, tmp_path / ".system-prompt.md"
+    )
+
+
 class TestCommand:
-    def test_carries_prompt_system_prompt_model_and_format(self, tmp_path: Path) -> None:
-        cmd = _runtime().build_command(_spec(tmp_path, needs=["read", "edit"]), None)
+    def test_carries_system_prompt_file_model_and_format(self, tmp_path: Path) -> None:
+        cmd = _cmd(tmp_path, needs=["read", "edit"])
         assert cmd[0] == "claude"
-        assert "-p" in cmd and "Task prompt." in cmd
-        assert cmd[cmd.index("--system-prompt") + 1] == "You are a source processor."
+        assert "-p" in cmd
+        # bare filename: the CLI resolves it against its cwd, which is the workdir
+        assert cmd[cmd.index("--system-prompt-file") + 1] == ".system-prompt.md"
         assert cmd[cmd.index("--model") + 1] == "sonnet"
         assert cmd[cmd.index("--output-format") + 1] == "stream-json"
         assert "--verbose" in cmd  # required for stream-json
 
+    def test_no_prompt_text_on_the_command_line(self, tmp_path: Path) -> None:
+        """Windows runs ``claude.cmd``, so cmd.exe re-parses the command line.
+
+        Prompt text carries quotes, newlines and JSON Schema braces; passed as an
+        argument it arrives mangled and the flags behind it are lost. Both prompts
+        therefore travel out of band — stdin and a file.
+        """
+        cmd = _cmd(tmp_path, needs=["read", "edit"])
+        assert "Task prompt." not in cmd
+        assert "You are a source processor." not in cmd
+        assert "--system-prompt" not in cmd  # the file variant, not the inline one
+
+    def test_system_prompt_is_written_beside_the_step(self, tmp_path: Path) -> None:
+        spec = _spec(tmp_path, needs=["read"])
+        spec.workdir.mkdir(parents=True, exist_ok=True)
+        path = _runtime()._write_system_prompt(spec)
+        assert path.parent == spec.workdir
+        assert path.read_text(encoding="utf-8") == spec.system_prompt
+
     def test_never_widens_file_access(self, tmp_path: Path) -> None:
         """I1: the step workdir is the boundary, so --add-dir must never appear."""
-        cmd = _runtime().build_command(_spec(tmp_path, needs=["read"]), None)
-        assert "--add-dir" not in cmd
+        assert "--add-dir" not in _cmd(tmp_path, needs=["read"])
 
     def test_never_forces_key_auth(self, tmp_path: Path) -> None:
         """--bare would demand an API key; this fork runs on the subscription."""
-        cmd = _runtime().build_command(_spec(tmp_path, needs=["read"]), None)
-        assert "--bare" not in cmd
+        assert "--bare" not in _cmd(tmp_path, needs=["read"])
 
-    def test_tools_are_restricted_to_declared_capabilities(self, tmp_path: Path) -> None:
-        cmd = _runtime().build_command(_spec(tmp_path, needs=["read"]), None)
-        tail = cmd[cmd.index("--allowedTools") + 1 :]
-        assert "Bash" not in tail and "Write" not in tail
+    def test_tools_are_restricted_to_declared_capabilities(
+        self, tmp_path: Path
+    ) -> None:
+        cmd = _cmd(tmp_path, needs=["read"])
+        granted = cmd[cmd.index("--allowedTools") + 1 : cmd.index("--disallowedTools")]
+        assert "Bash" not in granted and "Write" not in granted
+
+    def test_undeclared_tools_are_denied_not_merely_ungranted(
+        self, tmp_path: Path
+    ) -> None:
+        """--allowedTools alone does not confine the agent.
+
+        Under --permission-mode bypassPermissions every tool is pre-approved, and
+        live steps did reach for Bash and ToolSearch without declaring either.
+        Removing a tool takes --disallowedTools.
+        """
+        cmd = _cmd(tmp_path, needs=["read"])
+        denied = cmd[cmd.index("--disallowedTools") + 1 :]
+        assert "Bash" in denied
+        assert "Write" in denied  # 'read' does not grant writing
+        assert "Task" in denied  # spawning subagents escapes every other limit
+        assert "Read" not in denied  # granted, so not denied
+
+    def test_granting_a_capability_lifts_its_denial(self, tmp_path: Path) -> None:
+        cmd = _cmd(tmp_path, needs=["read", "edit", "bash"])
+        denied = cmd[cmd.index("--disallowedTools") + 1 :]
+        for tool in ("Read", "Glob", "Grep", "Write", "Edit", "Bash"):
+            assert tool not in denied
+        assert "WebFetch" in denied  # never declared
+
+    def test_mcp_agents_keep_the_tool_that_loads_their_servers(
+        self, tmp_path: Path
+    ) -> None:
+        """A live discover step reached Tavily's tools via ToolSearch."""
+        with_mcp = _cmd(tmp_path, needs=["read", "mcp:tavily-remote"])
+        assert "ToolSearch" not in with_mcp[with_mcp.index("--disallowedTools") + 1 :]
+        without = _cmd(tmp_path, needs=["read"])
+        assert "ToolSearch" in without[without.index("--disallowedTools") + 1 :]
+
+    def test_deny_list_and_grant_list_do_not_overlap(self, tmp_path: Path) -> None:
+        for needs in (["read"], ["edit"], ["webfetch"], ["read", "edit", "vision"]):
+            assert not set(allowed_tools(needs)) & set(denied_tools(needs))
 
     def test_mcp_config_is_pinned_strictly(self, tmp_path: Path) -> None:
         path = tmp_path / ".mcp.json"
-        cmd = _runtime().build_command(_spec(tmp_path, needs=["mcp:pdf-reader"]), path)
-        assert cmd[cmd.index("--mcp-config") + 1] == str(path)
+        cmd = _cmd(tmp_path, needs=["mcp:pdf-reader"], mcp=path)
+        assert cmd[cmd.index("--mcp-config") + 1] == ".mcp.json"
         # without this the user's own MCP servers would also load (I8)
         assert "--strict-mcp-config" in cmd
 
     def test_without_mcp_needs_no_config_flags(self, tmp_path: Path) -> None:
-        cmd = _runtime().build_command(_spec(tmp_path, needs=["read"]), None)
+        cmd = _cmd(tmp_path, needs=["read"])
         assert "--mcp-config" not in cmd and "--strict-mcp-config" not in cmd
+
+
+class TestUnusedMcpServers:
+    """A live find step never touched Tavily; the trace could not say why."""
+
+    def _trace(self, *tools: str) -> TurnTrace:
+        trace = TurnTrace()
+        for t in tools:
+            trace.events.append({"type": "tool_call", "payload": {"tool": t}})
+        return trace
+
+    def test_a_declared_server_that_was_never_called_is_reported(self) -> None:
+        trace = self._trace("WebSearch", "WebFetch", "Write")
+        assert unused_mcp_servers(["read", "mcp:tavily-remote"], trace) == [
+            "tavily-remote"
+        ]
+
+    def test_a_server_that_was_used_is_not_reported(self) -> None:
+        trace = self._trace("mcp__tavily-remote__tavily_search", "Write")
+        assert unused_mcp_servers(["mcp:tavily-remote"], trace) == []
+
+    def test_an_agent_with_no_mcp_needs_reports_nothing(self) -> None:
+        assert unused_mcp_servers(["read", "edit"], self._trace("Read")) == []
+
+
+class TestToolSurfaceDrift:
+    """A CLI upgrade can add a tool the deny list has never heard of."""
+
+    def test_a_tool_the_adapter_does_not_know_is_reported(self) -> None:
+        assert unknown_cli_tools(["Read", "Bash", "TeleportTool"]) == ["TeleportTool"]
+
+    def test_mcp_tools_are_not_drift(self) -> None:
+        # --strict-mcp-config already decides which servers exist for the step
+        assert unknown_cli_tools(["Read", "mcp__tavily-remote__tavily_search"]) == []
+
+    def test_a_known_surface_reports_nothing(self) -> None:
+        assert unknown_cli_tools(["Read", "Write", "Bash", "Task"]) == []
 
 
 class TestStreamParsing:
     def _line(self, payload: dict[str, object]) -> str:
         return json.dumps(payload)
 
+    def test_init_event_records_mcp_server_status(self) -> None:
+        """A step that got no working server must not look like one that ignored it."""
+        trace = TurnTrace()
+        parse_stream_line(
+            self._line(
+                {
+                    "type": "system",
+                    "subtype": "init",
+                    "tools": ["Read"],
+                    "mcp_servers": [
+                        {"name": "tavily-remote", "status": "connected"},
+                        {"name": "pdf-reader", "status": "failed"},
+                    ],
+                }
+            ),
+            "s",
+            trace,
+        )
+        recorded = [e for e in trace.events if "mcp_servers" in e.get("payload", {})]
+        assert recorded and recorded[0]["payload"]["mcp_servers"] == [
+            {"name": "tavily-remote", "status": "connected"},
+            {"name": "pdf-reader", "status": "failed"},
+        ]
+
+    def test_init_event_records_the_tool_surface(self) -> None:
+        trace = TurnTrace()
+        parse_stream_line(
+            self._line(
+                {"type": "system", "subtype": "init", "tools": ["Read", "Bash"]}
+            ),
+            "s",
+            trace,
+        )
+        assert trace.init_tools == ["Read", "Bash"]
+
     def test_assistant_text_accumulates(self) -> None:
         trace = TurnTrace()
         for chunk in ("Hello ", "world"):
             parse_stream_line(
                 self._line(
-                    {"type": "assistant", "message": {"content": [{"type": "text", "text": chunk}]}}
+                    {
+                        "type": "assistant",
+                        "message": {"content": [{"type": "text", "text": chunk}]},
+                    }
                 ),
                 "s",
                 trace,
@@ -198,7 +342,9 @@ class TestStreamParsing:
     def test_error_result_is_captured(self) -> None:
         trace = TurnTrace()
         parse_stream_line(
-            self._line({"type": "result", "is_error": True, "result": "usage limit reached"}),
+            self._line(
+                {"type": "result", "is_error": True, "result": "usage limit reached"}
+            ),
             "s",
             trace,
         )
@@ -219,6 +365,12 @@ class TestStreamParsing:
 class TestTransientClassification:
     def test_limits_and_transport_are_retryable(self) -> None:
         assert is_transient("Usage limit reached — resets at 4pm")
+        # the exact wording that burned 18 map items in a live run: the subscription
+        # says "session limit", which none of the other markers matched
+        assert is_transient(
+            "You've hit your session limit · resets 5:40pm (Europe/Istanbul)"
+        )
+        assert is_transient("You've hit your weekly limit")
         assert is_transient("API Error 429: rate_limit_error")
         assert is_transient("Overloaded")
         assert is_transient("ECONNRESET while connecting")
@@ -254,7 +406,9 @@ class TestProviderAvailability:
         monkeypatch.setattr(
             "refract.runtime.claude_code.cli_available", lambda exe=None: False
         )
-        assert self._app({"claude": {"models": ["sonnet"]}}).available_providers == set()
+        assert (
+            self._app({"claude": {"models": ["sonnet"]}}).available_providers == set()
+        )
 
     def test_a_provider_with_a_key_still_goes_by_its_env_var(
         self, monkeypatch: pytest.MonkeyPatch
@@ -272,3 +426,222 @@ class TestProviderAvailability:
         monkeypatch.setenv("SOME_KEY", "   ")
         app = self._app({"withkey": {"api_key_env": "SOME_KEY", "models": ["m"]}})
         assert app.available_providers == set()
+
+
+class TestWorkdirGuard:
+    """I1 enforced by a hook, not by prose (SPEC §12).
+
+    A live ``find`` step read the working directory out of the CLI's own system
+    prompt, retyped the run id with hyphens where the engine had underscores, and
+    wrote its entire shelf next to the real run — ``output/`` stayed empty and the
+    node was bound to fail its gate two steps from the cause.
+    """
+
+    def test_allows_paths_inside_the_workdir(self, tmp_path: Path) -> None:
+        from refract.runtime.workdir_guard import offending_path
+
+        wd = tmp_path / "steps" / "find" / "main"
+        wd.mkdir(parents=True)
+        for inside in ("output/found/a.md", "output", "./output/_index.json"):
+            assert offending_path({"file_path": inside}, wd) is None, inside
+        assert offending_path({"file_path": str(wd / "output" / "b.md")}, wd) is None
+
+    def test_blocks_the_retyped_run_id_and_absolute_escapes(
+        self, tmp_path: Path
+    ) -> None:
+        from refract.runtime.workdir_guard import offending_path
+
+        runs = tmp_path / "runs"
+        wd = runs / "run_20260731_113258" / "steps" / "find" / "main"
+        wd.mkdir(parents=True)
+        # the exact shape of the live failure: same tree, hyphens for underscores
+        retyped = runs / "run-20260731-113258" / "steps" / "find" / "main" / "output"
+        assert offending_path({"file_path": str(retyped / "x.md")}, wd) is not None
+        assert offending_path({"file_path": "../../../../elsewhere.md"}, wd) is not None
+        assert offending_path({"notebook_path": str(tmp_path / "n.ipynb")}, wd)
+
+    def test_hook_exit_code_blocks_and_explains(self, tmp_path: Path) -> None:
+        import io
+
+        from refract.runtime import workdir_guard
+
+        wd = tmp_path / "main"
+        wd.mkdir()
+        payload = json.dumps(
+            {"tool_name": "Write", "tool_input": {"file_path": str(tmp_path / "o.md")}}
+        )
+        stdin, sys.stdin = sys.stdin, io.StringIO(payload)
+        try:
+            code = workdir_guard.main(["guard", str(wd)])
+        finally:
+            sys.stdin = stdin
+        assert code == 2  # 2 = block; stderr reaches the model
+
+    def test_a_malformed_call_never_wedges_the_step(self, tmp_path: Path) -> None:
+        import io
+
+        from refract.runtime import workdir_guard
+
+        stdin, sys.stdin = sys.stdin, io.StringIO("not json")
+        try:
+            assert workdir_guard.main(["guard", str(tmp_path)]) == 0
+        finally:
+            sys.stdin = stdin
+
+    def test_runtime_writes_settings_and_passes_them_to_the_cli(
+        self, tmp_path: Path
+    ) -> None:
+        from refract.runtime.claude_code import (
+            GUARD_FILENAME,
+            SETTINGS_FILENAME,
+        )
+
+        rt = _runtime()
+        spec = _spec(tmp_path, needs=["read", "edit"])
+        spec.workdir.mkdir(parents=True, exist_ok=True)
+        settings_path = rt._write_workdir_guard(spec)
+
+        assert (spec.workdir / GUARD_FILENAME).exists()  # archived with the attempt
+        hook = json.loads(settings_path.read_text("utf-8"))["hooks"]["PreToolUse"][0]
+        assert "Write" in hook["matcher"] and "Edit" in hook["matcher"]
+        assert str(spec.workdir.resolve()) in hook["hooks"][0]["command"]
+
+        cmd = rt.build_command(
+            spec, None, tmp_path / ".system-prompt.md", settings_path
+        )
+        # bare filename, like every other config file: the CLI resolves it from cwd
+        assert cmd[cmd.index("--settings") + 1] == SETTINGS_FILENAME
+
+
+class TestFailedMcpServers:
+    """A declared server that never connects is worse than an unused one (I9).
+
+    A live ``find`` step was granted ``pdf-reader`` precisely because official
+    statistics and practice digests are PDFs. The server died on import, its tools
+    never appeared, and the step wrote two aspects off as unsupported by sources
+    while looking at the documents that supported them — with nothing in the run
+    saying the server was down.
+    """
+
+    def _trace(self, statuses: dict[str, str]) -> TurnTrace:
+        trace = TurnTrace()
+        for name, status in statuses.items():
+            parse_stream_line(
+                json.dumps(
+                    {
+                        "type": "system",
+                        "subtype": "init",
+                        "tools": [],
+                        "mcp_servers": [{"name": name, "status": status}],
+                    }
+                ),
+                "find",
+                trace,
+            )
+        return trace
+
+    def test_connected_server_is_not_reported(self) -> None:
+        trace = self._trace({"pdf-reader": "connected"})
+        assert failed_mcp_servers(["read", "mcp:pdf-reader"], trace) == []
+
+    def test_a_server_stuck_pending_or_failed_is_reported(self) -> None:
+        for status in ("pending", "failed", "needs-auth"):
+            trace = self._trace({"pdf-reader": status})
+            assert failed_mcp_servers(["mcp:pdf-reader"], trace) == ["pdf-reader"]
+
+    def test_a_server_the_cli_never_mentioned_is_reported(self) -> None:
+        assert failed_mcp_servers(["mcp:pdf-reader"], TurnTrace()) == ["pdf-reader"]
+
+    def test_a_later_frame_supersedes_the_init_status(self) -> None:
+        trace = TurnTrace()
+        for status in ("pending", "connected"):
+            parse_stream_line(
+                json.dumps(
+                    {"type": "system", "mcp_servers": [{"name": "t", "status": status}]}
+                ),
+                "find",
+                trace,
+            )
+        assert trace.mcp_status["t"] == "connected"
+        assert failed_mcp_servers(["mcp:t"], trace) == []
+
+    def test_an_agent_with_no_mcp_needs_reports_nothing(self) -> None:
+        assert failed_mcp_servers(["read", "edit"], self._trace({})) == []
+
+
+def test_every_event_the_adapter_emits_is_a_valid_event() -> None:
+    """Adapter telemetry must never fail a step whose gate already passed (SPEC §9).
+
+    A live ``find`` step gathered 19 sources, passed its gate, and was then failed by
+    the adapter's own warning: ``'warning' is not a valid EventType``. EventType is
+    closed, so anything the adapter emits has to be one of its members.
+    """
+    from refract.models.ledger import Event, EventType
+
+    emitted: list[dict[str, object]] = []
+    trace = TurnTrace()
+    parse_stream_line(
+        json.dumps(
+            {
+                "type": "system",
+                "subtype": "init",
+                "tools": ["Read"],
+                "mcp_servers": [{"name": "pdf-reader", "status": "failed"}],
+            }
+        ),
+        "find",
+        trace,
+    )
+    # the shape run_step emits for a server that never connected
+    broken = failed_mcp_servers(["mcp:pdf-reader"], trace)
+    assert broken == ["pdf-reader"]
+    emitted.append(
+        {
+            "type": "log",
+            "step_id": "find",
+            "payload": {"warning": f"MCP server(s) never connected: {broken[0]}"},
+        }
+    )
+    for raw in emitted:
+        event = Event(seq=1, ts="T", **raw)  # type: ignore[arg-type]
+        assert event.type in set(EventType)
+
+
+class TestEnvPlaceholders:
+    """``mcp.yaml`` writes ``{env:VAR}``; the CLI reads ``${VAR}`` (SPEC §7, I8).
+
+    An untranslated placeholder is not an error — it is passed through verbatim. A
+    live ``find`` step ran its whole search with the literal string
+    ``{env:TAVILY_API_KEY}`` as its API key, got "Invalid Tavily API key" on every
+    call, and silently fell back to plain web search.
+    """
+
+    def test_stdio_args_are_translated(self) -> None:
+        mcp = McpFile.model_validate(
+            {
+                "servers": {
+                    "tavily-remote": {
+                        "command": [
+                            "npx",
+                            "mcp-remote",
+                            "https://mcp.tavily.com/mcp/?tavilyApiKey={env:TAVILY_API_KEY}",
+                        ],
+                        "env": {"EXTRA": "{env:OTHER_KEY}"},
+                    }
+                }
+            }
+        )
+        entry = mcp_config(["mcp:tavily-remote"], mcp)["mcpServers"]
+        assert isinstance(entry, dict)
+        server = entry["tavily-remote"]
+        assert server["args"][-1].endswith("?tavilyApiKey=${TAVILY_API_KEY}")
+        assert server["env"]["EXTRA"] == "${OTHER_KEY}"
+        # the secret itself is still never inlined (I8)
+        assert "tvly-" not in json.dumps(server)
+
+    def test_text_without_a_placeholder_is_untouched(self) -> None:
+        from refract.runtime.claude_code import env_placeholders
+
+        assert env_placeholders("npx") == "npx"
+        assert env_placeholders("${ALREADY}") == "${ALREADY}"
+        assert env_placeholders("{env:A}/{env:B}") == "${A}/${B}"

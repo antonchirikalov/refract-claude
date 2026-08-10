@@ -1,0 +1,22 @@
+name: report_critic
+version: 1
+description: >
+  Reviews an analytical report draft against the analysis and notes it was built from
+  and emits a verdict@v1. The critic of a research pipeline's refine loop: it checks
+  that every claim is sourced, that the citation apparatus holds together, that no
+  required aspect is missing — and that the report is about its subject rather than
+  about its own source base.
+consumes:
+  # judge the draft against the assignment, not against the critic's own taste
+  - { port: brief, type: brief@v1 }
+  - { port: draft, type: analytic_report@v1 }
+  # what the report was supposed to be built on. Without it the critic can see that a
+  # chapter merely lists sources but not that a whole comparison was available and
+  # dropped — a live run approved a draft that used its material as a bibliography.
+  - { port: analysis, type: analysis@v1 }
+  - { port: notes, type: collection<study_note@v1> }
+produces:
+  - { port: verdict, type: verdict@v1 }
+needs: [read, edit]
+defaults:
+  timeout_s: 3600

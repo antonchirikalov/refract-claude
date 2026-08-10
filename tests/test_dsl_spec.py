@@ -27,7 +27,8 @@ DSL_SPEC = REPO / "docs" / "spec" / "SPEC-DSL.md"
 LIBRARY = REPO / "library"
 
 pytestmark = pytest.mark.skipif(
-    not DSL_SPEC.exists(), reason="docs/spec/SPEC-DSL.md is not present in this checkout"
+    not DSL_SPEC.exists(),
+    reason="docs/spec/SPEC-DSL.md is not present in this checkout",
 )
 
 _SPEC_TEXT = DSL_SPEC.read_text("utf-8") if DSL_SPEC.exists() else ""

@@ -36,12 +36,13 @@ class ProjectConfig(BaseModel):
 class ProviderConfig(BaseModel):
     """One provider entry (SPEC §7). Key = model prefix up to the first ``/``.
 
-This fork runs on the Claude Code CLI, which authenticates from the subscription it
-    is logged into, so ``api_key_env`` is OPTIONAL: a provider without it is available
-    when the CLI is present. ``models`` is the catalog of model-ids (or CLI aliases such
-    as ``sonnet``/``opus``) offered under this provider — the menu a pipeline picks from
-    when assigning ``model:`` per node. ``max_concurrent`` matters more here than with a
-    key: a subscription is rate-limited per account, so keep it low.
+    This fork runs on the Claude Code CLI, which authenticates from the subscription
+    it is logged into, so ``api_key_env`` is OPTIONAL: a provider without it is
+    available when the CLI is present. ``models`` is the catalog of model-ids (or CLI
+    aliases such as ``sonnet``/``opus``) offered under this provider — the menu a
+    pipeline picks from when assigning ``model:`` per node. ``max_concurrent`` matters
+    more here than with a key: a subscription is rate-limited per account, so keep it
+    low.
     """
 
     model_config = ConfigDict(extra="forbid")

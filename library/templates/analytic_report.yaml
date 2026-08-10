@@ -1,0 +1,76 @@
+version: "0.1"
+name: analytic_report
+
+# Analytic report mode: you give a topic and the terms it must satisfy instead of
+# documents. A discover node searches the web and captures the sources itself
+# (SPEC §20), one reading note is taken per source, an analyst reconciles those notes
+# into the subject-matter analysis, and a writer builds the report from that analysis
+# under a critic that checks it until it holds up.
+input_mode: brief
+
+nodes:
+  - id: brief
+    type: builtin/brief
+
+  - id: find
+    type: discover
+    agent: source_finder@1
+    inputs: { brief: brief.brief }
+    # a floor, not a target: how many sources the report actually needs is the
+    # brief's business. Set high, one unreachable site fails the whole node and
+    # discards a perfectly usable shelf
+    params: { min_sources: 8 }
+
+  - id: study
+    type: agent
+    agent: study_extractor@1
+    map: find.sources
+    # the brief is broadcast to every item step: the note's language, its citation
+    # standard and the aspect numbering all come from the assignment
+    inputs: { brief: brief.brief }
+    # min_ok is the point below which the shelf is too thin to write from at all:
+    # set it low and the report quietly gets written on whatever survived. It must
+    # also stay under min_sources above — set higher, the node cannot pass even when
+    # the finder delivers exactly its floor.
+    params: { workers: 3, min_ok: 6 }
+
+  - id: analyse
+    type: agent
+    # The stage the first live run did without, and the reason its report read as a
+    # characterisation of its own source base: with reading feeding prose directly,
+    # nobody reconciled the sources, so the only material available in quantity was
+    # the sources themselves. This node does the comparing, sequencing and weighing
+    # that no single-source note can do, and hands the writer subject matter.
+    agent: domain_analyst@1
+    inputs: { brief: brief.brief, notes: study.note }
+    # reasoning over the whole set of notes at once — the strong model earns its
+    # keep here more than anywhere else in the pipeline
+    params: { model: claude/opus }
+
+  - id: report
+    type: loop
+    # a long sourced document does not converge in three: in a live run the critic's
+    # remarks kept shrinking (6 → 2 → 3) round after round without running out
+    params: { max_rounds: 5 }
+    body:
+      # Model choice belongs to the archetype: the steps that reason over the whole
+      # document get the strong model, the volume work upstream (one note per source)
+      # stays cheap. A project may override either.
+      agent: report_writer@1
+      model: claude/opus
+      inputs:
+        brief: brief.brief
+        analysis: analyse.analysis
+        notes: study.note
+    critic:
+      # The step where attention over a long document decides whether a fabricated
+      # citation ships — a weaker critic read 46 pages and raised one issue, missing
+      # a stub entry and a working memo cited as a source.
+      agent: report_critic@1
+      model: claude/opus
+      inputs:
+        brief: brief.brief
+        draft: "@body"
+        analysis: analyse.analysis
+        notes: study.note
+    outputs: { doc: "@body" }

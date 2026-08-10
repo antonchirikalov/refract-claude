@@ -1,0 +1,20 @@
+name: domain_analyst
+version: 1
+description: >
+  Does the subject-matter work between reading and writing: takes the whole set of
+  per-source study notes and produces the analysis the report is built on — what the
+  sources establish together, the chronologies and comparisons no single note can
+  carry, where they diverge, and what follows. Emits analysis@v1, organised by the
+  brief's required aspects.
+consumes:
+  # the aspects are the analysis's skeleton, so the assignment is not optional here
+  - { port: brief, type: brief@v1 }
+  - { port: notes, type: collection<study_note@v1> }
+produces:
+  - { port: analysis, type: analysis@v1 }
+# no search, for the same reason the writer has none: every finding must trace back
+# to a note and through it to a fetched source. An analyst that can look things up
+# will quietly supply the connective tissue the sources do not carry.
+needs: [read, edit]
+defaults:
+  timeout_s: 5400

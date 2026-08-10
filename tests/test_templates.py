@@ -34,9 +34,13 @@ def _ctx() -> ValidationContext:
     return ValidationContext(
         registry=ArtifactRegistry.load(LIBRARY),
         agents=agents,
-        known_providers={"kimi", "openai"},
-        available_providers={"kimi", "openai"},
-        default_model="kimi/kimi-k3",
+        # This fork runs on the Claude Code CLI, which serves the subscription's
+        # models and nothing else: `model_alias()` strips the provider and hands the
+        # rest to `--model`, so a non-claude provider is not a different vendor here,
+        # it is an unrunnable pipeline. The shipped templates name only claude/*.
+        known_providers={"claude"},
+        available_providers={"claude"},
+        default_model="claude/sonnet",
         # the servers the shipped agents need (~/.refract/mcp.yaml declares these)
         known_mcp_servers={"tavily-remote", "pdf-reader", "paperbanana"},
     )
@@ -70,7 +74,14 @@ def test_library_agents_load_without_errors() -> None:
 
 @pytest.mark.parametrize(
     "name",
-    ["extract", "discovery", "solution_design", "research", "requirements_to_design"],
+    [
+        "extract",
+        "discovery",
+        "solution_design",
+        "research",
+        "requirements_to_design",
+        "analytic_report",
+    ],
 )
 def test_template_validates(name: str) -> None:
     graph = load_pipeline(TEMPLATES / f"{name}.yaml", _ctx())
@@ -92,6 +103,50 @@ _DESIGN = (
 _REPORT = "# Discovery\nOpen questions and unknowns.\n"
 _APPROVED = json.dumps({"verdict": "approved"})
 _EXTRACT = json.dumps({"source": "s", "requirements": [], "trust_level": "low"})
+
+# --- analytic_report fixtures -----------------------------------------------
+# study_note@v1: the minimum a real note must carry to be usable downstream
+_NOTE = json.dumps(
+    {
+        "source": "first",
+        "source_kind": "primary_document",
+        "primacy": "primary",
+        "bibliography": {
+            "entry": "Author A. A title long enough to identify the source. Publisher, 2026. URL: https://example.org/a",
+            "incomplete_fields": ["pages"],
+        },
+        "key_points": [{"text": "The source establishes a thing.", "locator": "s. 2"}],
+        "aspect_ids": ["1"],
+        "trust_level": "high",
+    }
+)
+# analysis@v1: one aspect, one finding traced to the note above
+_ANALYSIS = json.dumps(
+    {
+        "aspects": [
+            {
+                "aspect": "1. The state of the matter",
+                "established": [
+                    {"statement": "A thing holds.", "notes": ["first"]},
+                ],
+                "implications": ["It will keep holding."],
+                "material_gaps": [],
+            }
+        ],
+        "cross_aspect": [{"observation": "The aspects share a cause."}],
+    }
+)
+# analytic_report@v1 is gated on headings, length and citation closure, so the
+# scripted draft has to clear the same gate a real writer faces
+_ANALYTIC_REPORT = (
+    "# ВСТУП\n\nThe subject and how the report proceeds [1].\n\n"
+    "# 1. THE STATE OF THE MATTER\n\n"
+    + ("A paragraph of substantive analysis carrying weight [1]. " * 400)
+    + "\n\n# ВИСНОВКИ\n\nWhat was established, drawn together [1].\n\n"
+    "# СПИСОК ВИКОРИСТАНИХ ДЖЕРЕЛ\n\n"
+    "1. Author A. A title long enough to identify the source. Publisher, 2026. "
+    "URL: https://example.org/a\n"
+)
 
 # Scripted outputs keyed by fnmatch step-id pattern; filenames match each agent's
 # primary produce PORT (SPEC §10.4), not the loop output alias.
@@ -119,12 +174,23 @@ _SCENARIOS: dict[str, dict[str, dict[str, str]]] = {
         "refine.body:*": {"requirements.md": _REQ},
         "refine.critic:*": {"verdict.json": _APPROVED},
     },
+    "analytic_report": {
+        # min_sources: 8 — the finder must deliver its floor or the node fails
+        "find": {
+            f"found/source-{i}.md": f"# Source {i}\nSubstance.\n" for i in range(1, 9)
+        },
+        "study:*": {"note.json": _NOTE},
+        # the stage between reading and writing: notes in, subject matter out
+        "analyse": {"analysis.json": _ANALYSIS},
+        "report.body:*": {"report.md": _ANALYTIC_REPORT},
+        "report.critic:*": {"verdict.json": _APPROVED},
+    },
     "requirements_to_design": {
         "extract:*": {"extract.json": _EXTRACT},
         "refine.body:*": {"requirements.md": _REQ},
         "refine.critic:*": {"verdict.json": _APPROVED},
         "design:*": {"design_doc.md": _DESIGN},
-        "choose.selector": {"choice.json": json.dumps({"winner": "openai_gpt-5-6"})},
+        "choose.selector": {"choice.json": json.dumps({"winner": "claude_opus"})},
         "sd_refine.body:*": {"design_doc.md": _DESIGN},
         "sd_refine.critic:*": {"verdict.json": _APPROVED},
     },
@@ -133,7 +199,7 @@ _SCENARIOS: dict[str, dict[str, dict[str, str]]] = {
         "refine.body:*": {"requirements.md": _REQ},
         "refine.critic:*": {"verdict.json": _APPROVED},
         "design:*": {"design_doc.md": _DESIGN},
-        "choose.selector": {"choice.json": json.dumps({"winner": "openai_gpt-5-6"})},
+        "choose.selector": {"choice.json": json.dumps({"winner": "claude_opus"})},
         "sd_refine.body:*": {"design_doc.md": _DESIGN},
         "sd_refine.critic:*": {"verdict.json": _APPROVED},
     },
@@ -146,7 +212,14 @@ async def _no_sleep(_seconds: float) -> None:
 
 @pytest.mark.parametrize(
     "name",
-    ["extract", "discovery", "solution_design", "research", "requirements_to_design"],
+    [
+        "extract",
+        "discovery",
+        "solution_design",
+        "research",
+        "requirements_to_design",
+        "analytic_report",
+    ],
 )
 def test_template_runs_end_to_end(name: str, tmp_path: Path) -> None:
     agents, _ = load_agents(LIBRARY)
@@ -156,7 +229,7 @@ def test_template_runs_end_to_end(name: str, tmp_path: Path) -> None:
     )
     # resolve effective models (as the snapshot does) so map/loop nodes have one
     pipeline = Pipeline.model_validate(
-        build_resolved(raw, agents=agents, overrides={}, default_model="kimi/kimi-k3")
+        build_resolved(raw, agents=agents, overrides={}, default_model="claude/sonnet")
     )
 
     proj_in = tmp_path / "input"
@@ -234,5 +307,5 @@ def test_template_runs_end_to_end(name: str, tmp_path: Path) -> None:
         assert (discover_in / "requirements" / "requirements.md").exists()
     if name == "solution_design":
         # the winner_model binding resolved and the final loop assembled its output
-        assert ledger.get_node("choose").winner_model == "openai/gpt-5.6"
+        assert ledger.get_node("choose").winner_model == "claude/opus"
         assert (run_dir / "steps" / "sd_refine" / "_out" / "design.md").exists()

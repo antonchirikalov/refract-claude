@@ -10,7 +10,7 @@ import pytest
 
 from refract.models.agent import AgentSpec
 from refract.models.ledger import StepOutcome, StepStatus
-from refract.models.types import ItemInfo
+from refract.models.types import ItemInfo, MinLengthRule
 from refract.registry import ArtifactRegistry
 from refract.runtime.base import EventCallback, StepResult, StepSpec
 from refract.runtime.mock import MockRuntime, ScriptedResponse
@@ -75,6 +75,7 @@ def _plan(
     infra_retries: int = 2,
     timeout_s: int = 3600,
     agent_prompt: str = "You are a writer agent.",
+    gate_rules: list | None = None,
 ) -> AgentStepPlan:
     workdir = tmp_path / "steps" / node_id / "main"
     workdir.mkdir(parents=True, exist_ok=True)
@@ -93,6 +94,7 @@ def _plan(
         gate_retries=gate_retries,
         infra_retries=infra_retries,
         timeout_s=timeout_s,
+        gate_rules=gate_rules or [],
     )
 
 
@@ -364,6 +366,67 @@ class TestGateRetrySuccess:
         assert "Validation feedback" in current_prompt or "min_length" in current_prompt
 
 
+class TestNodeGateRules:
+    """SPEC §8 ``gate_rules``: a project states its own terms without touching the type."""
+
+    def _rule(self, value: int) -> MinLengthRule:
+        return MinLengthRule(rule="min_length", value=value)
+
+    async def test_node_rule_tightens_the_type(
+        self, tmp_path: Path, registry: ArtifactRegistry
+    ) -> None:
+        """Output satisfies the type (min_length 20) but not the node's own floor."""
+        agent = _agent()
+        plan = _plan(
+            tmp_path, registry, agent, gate_retries=1, gate_rules=[self._rule(500)]
+        )
+        ledger = _ledger(tmp_path, ["write"])
+        runtime = MockRuntime(
+            {
+                "*": [
+                    ScriptedResponse(files={"doc.md": "c" * 30}),  # passes the type
+                    ScriptedResponse(files={"doc.md": "c" * 500}),  # meets the node
+                ]
+            }
+        )
+
+        state = await execute_agent_step(plan, runtime, ledger, sleeper=_no_sleep)
+
+        assert state.status is StepStatus.done
+        assert state.tries == 2
+        report = json.loads(
+            (plan.workdir / "attempts" / "1" / "gate_report.json").read_text("utf-8")
+        )
+        assert any("500" in p for p in report["ports"][0]["problems"])
+
+    async def test_the_agent_is_told_the_tightened_number(
+        self, tmp_path: Path, registry: ArtifactRegistry
+    ) -> None:
+        """I5: what the step is held to is generated into the prompt, not hand-written."""
+        agent = _agent()
+        plan = _plan(tmp_path, registry, agent, gate_rules=[self._rule(500)])
+        ledger = _ledger(tmp_path, ["write"])
+        runtime = MockRuntime({"*": [ScriptedResponse(files={"doc.md": "c" * 500})]})
+
+        await execute_agent_step(plan, runtime, ledger, sleeper=_no_sleep)
+
+        prompt = (plan.workdir / "prompt.md").read_text("utf-8")
+        assert "500 characters" in prompt
+
+    async def test_without_node_rules_only_the_type_applies(
+        self, tmp_path: Path, registry: ArtifactRegistry
+    ) -> None:
+        agent = _agent()
+        plan = _plan(tmp_path, registry, agent)
+        ledger = _ledger(tmp_path, ["write"])
+        runtime = MockRuntime({"*": [ScriptedResponse(files={"doc.md": "c" * 30})]})
+
+        state = await execute_agent_step(plan, runtime, ledger, sleeper=_no_sleep)
+
+        assert state.outcome is StepOutcome.ok
+        assert state.tries == 1
+
+
 # --- 5. gate exhausted ---------------------------------------------------------
 
 
@@ -620,3 +683,34 @@ class TestLedgerIntegration:
         assert step_events[0]["payload"]["to"] == "running"
         assert step_events[-1]["payload"]["to"] == "done"
         assert step_events[-1]["payload"]["outcome"] == "ok"
+
+
+def test_retrying_a_step_rebuilds_its_inputs(tmp_path: Path) -> None:
+    """A second materialization pass must not trip over the first (SPEC §10.1).
+
+    ``link_or_copy`` requires a destination that does not exist, so re-running a step
+    whose ``input/`` was already laid out raised ``FileExistsError`` — every
+    ``resume --retry-failed`` of a non-map step died on its own leftovers. A live run
+    hit this resuming the analysis step after the subscription window ran out.
+    """
+    from refract.steps import AuxFileInput, _materialize
+
+    src = tmp_path / "src"
+    (src / "notes").mkdir(parents=True)
+    (src / "notes" / "a.json").write_text('{"source": "a"}', encoding="utf-8")
+    input_root = tmp_path / "work" / "input"
+    input_root.mkdir(parents=True)
+
+    inputs = [AuxFileInput(src=src / "notes" / "a.json", rel_path="notes/a.json")]
+    _materialize(inputs, input_root)
+    first = (input_root / "notes" / "a.json").read_text(encoding="utf-8")
+
+    # the retry: same inputs, workdir already populated
+    _materialize(inputs, input_root)
+    assert (input_root / "notes" / "a.json").read_text(encoding="utf-8") == first
+
+    # stale material from an earlier attempt does not survive the rebuild
+    (input_root / "leftover").mkdir()
+    (input_root / "leftover" / "old.txt").write_text("stale", encoding="utf-8")
+    _materialize(inputs, input_root)
+    assert not (input_root / "leftover").exists()

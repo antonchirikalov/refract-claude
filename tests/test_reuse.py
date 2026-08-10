@@ -19,7 +19,7 @@ from refract.events import EventWriter
 from refract.models.agent import AgentSpec
 from refract.models.ledger import NodeStatus, RunStatus, StepStatus
 from refract.models.pipeline import Pipeline
-from refract.reuse import descendants, recompute_set
+from refract.reuse import builtin_signature, descendants, recompute_set
 from refract.runtime.base import EventCallback, StepResult, StepSpec
 from refract.runtime.mock import MockRuntime, ScriptedResponse
 from refract.scheduler import run_pipeline
@@ -523,3 +523,47 @@ class TestDescendantsAndRecomputeSet:
         assert recompute_set(deps, ["proc"]) == {"proc", "write"}
         assert recompute_set(deps, ["write"]) == {"write"}
         assert recompute_set(deps, ["scan"]) == {"scan", "proc", "write"}
+
+
+class TestBuiltinSignature:
+    """SPEC §10.5: a builtin's output signature decides whether downstream survives.
+
+    Only collection outputs were understood, so ``builtin/brief`` — a plain
+    ``<port>.md`` with no manifest — always signed as empty, always counted as
+    changed, and silently disabled reuse for every brief-driven pipeline: a
+    ``rerun --from report`` re-searched the web and re-extracted every source.
+    """
+
+    def _brief_out(self, tmp_path: Path, text: str) -> Path:
+        out = tmp_path / "output"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "brief.md").write_text(text, encoding="utf-8")
+        return out
+
+    def test_a_file_output_has_a_signature(self, tmp_path: Path) -> None:
+        sig = builtin_signature(self._brief_out(tmp_path, "тема"), "brief")
+        assert sig != ""
+
+    def test_same_content_signs_the_same(self, tmp_path: Path) -> None:
+        a = builtin_signature(self._brief_out(tmp_path / "a", "тема"), "brief")
+        b = builtin_signature(self._brief_out(tmp_path / "b", "тема"), "brief")
+        assert a == b
+
+    def test_edited_content_signs_differently(self, tmp_path: Path) -> None:
+        a = builtin_signature(self._brief_out(tmp_path / "a", "тема"), "brief")
+        b = builtin_signature(self._brief_out(tmp_path / "b", "інша тема"), "brief")
+        assert a != b
+
+    def test_a_collection_still_signs_by_manifest(self, tmp_path: Path) -> None:
+        out = tmp_path / "output" / "sources"
+        out.mkdir(parents=True)
+        (out / "_collection.json").write_text(
+            json.dumps({"items": [{"slug": "a", "source_hash": "h1", "status": "ok"}]}),
+            encoding="utf-8",
+        )
+        assert builtin_signature(tmp_path / "output", "sources") == "a:h1:ok"
+
+    def test_nothing_produced_signs_empty(self, tmp_path: Path) -> None:
+        (tmp_path / "output").mkdir()
+        # empty means "cannot verify" and the caller treats it as changed
+        assert builtin_signature(tmp_path / "output", "brief") == ""
