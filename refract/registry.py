@@ -23,6 +23,7 @@ from refract.models.types import (
     ArtifactTypesFile,
     CitationClosureRule,
     ForbidRegexRule,
+    MinEntriesRule,
     MinLengthRule,
     RegexRule,
     Rule,
@@ -179,6 +180,10 @@ def apply_rules(rules: Sequence[Rule], text: str) -> list[str]:
                 failures.append(f"min_length {rule.value} not met (got {len(text)})")
         elif isinstance(rule, CitationClosureRule):
             failures.extend(check_citation_closure(text, rule))
+        elif isinstance(rule, MinEntriesRule):
+            # a directory rule reaching text means it was put on a `file` type: the gate
+            # for dir ports enforces it, and silence here would look like a pass
+            failures.append("min_entries applies to kind=dir artifacts, not to files")
     return failures
 
 

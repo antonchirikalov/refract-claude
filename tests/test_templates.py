@@ -155,9 +155,14 @@ _ANALYTIC_REPORT = (
 # article@v1 gates on three things: an H1 at the very start, at least one figure
 # placeholder (the contract the illustrator fulfils), and a genre floor of 6000 chars.
 # The prose deliberately contains none of the calques the `restyle` node forbids.
+# The article declares four figures; the illustrator owes exactly these four filenames.
+_FIGURE_SLUGS = ("x-to-qkv", "scores-heatmap", "softmax-weighted-sum", "multi-head")
 _ARTICLE = (
     "# Механизм внимания\n\n"
-    "![Одна матрица X превращается в Q, K и V тремя проекциями](figures/x-to-qkv.png)\n\n"
+    + "".join(
+        f"![Схема {i}: как это работает](figures/{slug}.png)\n\n"
+        for i, slug in enumerate(_FIGURE_SLUGS, start=1)
+    )
     + (
         "Каждый токен получает три вектора, и каждый из них отвечает за свою роль "
         "в вычислении. Скалярное произведение показывает, насколько один вектор "
@@ -242,8 +247,10 @@ _SCENARIOS: dict[str, dict[str, dict[str, str]]] = {
         "write.critic:*": {"verdict.json": _APPROVED},
         "style": {"findings.json": _FINDINGS},
         "restyle": {"article.md": _ARTICLE},
+        # four figures and the manifest: the node's own `min_entries: 5`, which is what
+        # keeps "produced one of the four it owed" from passing as a non-empty directory
         "figures": {
-            "illustration/x-to-qkv.png": _PNG,
+            **{f"illustration/{slug}.png": _PNG for slug in _FIGURE_SLUGS},
             "illustration/manifest.json": _MANIFEST,
         },
     },
@@ -374,7 +381,7 @@ def test_template_runs_end_to_end(name: str, tmp_path: Path) -> None:
         assert (run_dir / "steps" / "sd_refine" / "_out" / "design.md").exists()
 
 
-def _run_explainer(tmp_path, *, restyle_article: str):
+def _run_explainer(tmp_path, *, restyle_article: str, figures: dict | None = None):
     """Run explainer_article with the checkpoint lifted, so the tail executes.
 
     The parametrized e2e stops at the checkpoint by design (SPEC §21), which leaves
@@ -412,6 +419,8 @@ def _run_explainer(tmp_path, *, restyle_article: str):
     )
     scenario = dict(_SCENARIOS["explainer_article"])
     scenario["restyle"] = {"article.md": restyle_article}
+    if figures is not None:
+        scenario["figures"] = figures
     runtime = MockRuntime(
         {pat: [ScriptedResponse(files=f)] for pat, f in scenario.items()}
     )
@@ -438,8 +447,9 @@ def test_explainer_tail_produces_figures_for_the_declared_placeholders(tmp_path:
         k: (v.status.value, v.error) for k, v in ledger.state.nodes.items()
     }
     figures = run_dir / "steps" / "figures" / "main" / "output" / "illustration"
-    # the slug in the article's placeholder is the filename the illustrator must produce
-    assert (figures / "x-to-qkv.png").exists()
+    # every slug the article declared is a filename the illustrator owes
+    for slug in _FIGURE_SLUGS:
+        assert (figures / f"{slug}.png").exists(), slug
     manifest = json.loads((figures / "manifest.json").read_text("utf-8"))
     assert manifest["figures"][0]["slug"] == "x-to-qkv"
     # the loop body is a CHAIN: two steps per round, in order
@@ -462,3 +472,24 @@ def test_explainer_calque_gate_bites_on_the_editor(tmp_path: Path):
     assert step is not None and "стоит отметить" in (step.error or "").lower()
     # the figures node never ran: the article it would illustrate did not pass
     assert ledger.get_node("figures").status is NodeStatus.skipped
+
+
+def test_explainer_min_entries_gate_catches_a_short_figure_set(tmp_path: Path):
+    """One figure out of four is the classic silent thin pass (SPEC §5 min_entries).
+
+    A `dir` port is otherwise gated on non-emptiness alone, so a step that produced a
+    single PNG would report `ok` and the missing three would surface only when a human
+    opened the article.
+    """
+    status, ledger, _ = _run_explainer(
+        tmp_path,
+        restyle_article=_ARTICLE,
+        figures={
+            "illustration/x-to-qkv.png": _PNG,
+            "illustration/manifest.json": _MANIFEST,
+        },
+    )
+    assert status is RunStatus.failed
+    step = ledger.get_step("figures")
+    assert step is not None
+    assert "min_entries 5 not met (got 2)" in (step.error or "")

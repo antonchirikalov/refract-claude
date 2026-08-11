@@ -732,3 +732,70 @@ class TestForbidRegex:
         rule = self._rule(r"\bтебе\b", max_hits=2)
         measures = measure_rules([rule], "тебе один раз")
         assert measures["forbidden"] == {r"\bтебе\b": 1}
+
+
+# --- min_entries: a thin directory is a failure, not a pass ------------------
+
+
+class TestMinEntries:
+    """`kind: dir` was gated on non-emptiness alone: one figure out of four passed."""
+
+    def _port(self, tmp_path, rules):
+        from refract.artifacts import GatePort, check_port
+        from refract.registry import ArtifactRegistry
+
+        types = tmp_path / "lib" / "types"
+        types.mkdir(parents=True)
+        (types / "artifact_types.yaml").write_text(
+            'version: "0.1"\ntypes:\n  illustration@v1: { kind: dir }\n',
+            encoding="utf-8",
+        )
+        registry = ArtifactRegistry.load(tmp_path / "lib")
+        rtype = registry.get("illustration@v1")
+        assert rtype is not None
+        out = tmp_path / "out"
+        (out / "illustration").mkdir(parents=True)
+        return (
+            out,
+            GatePort(port="illustration", rtype=rtype, extra_rules=tuple(rules)),
+            check_port,
+        )
+
+    def _rule(self, value: int):
+        from refract.models.types import MinEntriesRule
+
+        return MinEntriesRule(rule="min_entries", value=value)
+
+    def test_short_directory_fails_with_the_count(self, tmp_path) -> None:
+        out, port, check = self._port(tmp_path, [self._rule(5)])
+        for name in ("a.png", "manifest.json"):
+            (out / "illustration" / name).write_text("x", encoding="utf-8")
+        result = check(out, port)
+        assert not result.ok
+        assert "min_entries 5 not met (got 2)" in result.problems[0]
+        # the near-miss is measured either way, for `refract explain`
+        assert result.measures == {"entries": 2, "min_entries": 5}
+
+    def test_enough_entries_passes(self, tmp_path) -> None:
+        out, port, check = self._port(tmp_path, [self._rule(3)])
+        for name in ("a.png", "b.png", "manifest.json"):
+            (out / "illustration" / name).write_text("x", encoding="utf-8")
+        result = check(out, port)
+        assert result.ok, result.problems
+        assert result.measures["entries"] == 3
+
+    def test_dot_entries_do_not_count(self, tmp_path) -> None:
+        """As everywhere else in the engine: a `.keep` is not content."""
+        out, port, check = self._port(tmp_path, [self._rule(2)])
+        (out / "illustration" / "a.png").write_text("x", encoding="utf-8")
+        (out / "illustration" / ".keep").write_text("", encoding="utf-8")
+        result = check(out, port)
+        assert not result.ok
+        assert "got 1" in result.problems[0]
+
+    def test_on_a_file_type_it_says_so_instead_of_passing(self) -> None:
+        """Misuse must be loud: silence would read as a satisfied rule."""
+        from refract.registry import apply_rules
+
+        problems = apply_rules([self._rule(2)], "some text")
+        assert problems and "kind=dir" in problems[0]

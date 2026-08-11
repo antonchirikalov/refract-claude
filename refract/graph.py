@@ -20,6 +20,7 @@ from pydantic import ValidationError as PydanticValidationError
 from refract.builtins import BUILTINS, BuiltinDef
 from refract.models.agent import AgentSpec, Port
 from refract.models.errors import Code, ValidationError
+from refract.models.types import MinEntriesRule
 from refract.models.pipeline import (
     AgentNode,
     BodyBlock,
@@ -471,10 +472,13 @@ class _Validator:
     def _check_gate_rules(
         self, node_id: str, spec: AgentSpec, gate_rules: Sequence[object]
     ) -> None:
-        """``gate_rules`` tighten the primary port, so that port must be a file (§8).
+        """``gate_rules`` tighten the primary port, and a rule must fit its kind (§8).
 
-        Rules read the artifact's text; on a ``dir``/``any`` port there is nothing to
-        read, and a rule that can never run would silently promise a guarantee.
+        Text rules read the artifact's content, so on a ``dir``/``any`` port there is
+        nothing to read and a rule that can never run would silently promise a
+        guarantee. ``min_entries`` is the reverse case: it counts directory entries and
+        is meaningless on a file. Each kind therefore accepts exactly the rules that can
+        actually run against it.
         """
         if not gate_rules:
             return
@@ -487,12 +491,23 @@ class _Validator:
             )
             return
         rtype = self.ctx.registry.get(primary[0].type)
-        if rtype is not None and rtype.kind.value != "file":
+        if rtype is None:
+            return
+        dir_rules = [r for r in gate_rules if isinstance(r, MinEntriesRule)]
+        text_rules = [r for r in gate_rules if not isinstance(r, MinEntriesRule)]
+        if rtype.kind.value == "file" and dir_rules:
+            self.err(
+                Code.E_GATE_RULES_SHAPE,
+                node_id,
+                f"min_entries counts directory entries; port {primary[0].port!r} is a "
+                "file artifact",
+            )
+        if rtype.kind.value != "file" and text_rules:
             self.err(
                 Code.E_GATE_RULES_SHAPE,
                 node_id,
                 f"gate_rules apply to the primary port {primary[0].port!r}, which is "
-                f"{rtype.kind.value}-kind — rules only apply to file artifacts",
+                f"{rtype.kind.value}-kind — only min_entries applies to a directory",
             )
 
     def _check_agent_contract(self, node_id: str, spec: AgentSpec) -> None:

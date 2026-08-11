@@ -135,3 +135,9 @@ nodes:
     inputs: { article: restyle.article }
     # Four diagrams through an external tool with its own refinement loop: generous.
     params: { timeout_s: 3600 }
+    # The brief asks for four figures, so the step owes four files and the manifest. A
+    # `dir` port is otherwise gated on non-emptiness alone — one figure out of four
+    # would pass, and nothing in the run would say so. The node knows the number; it
+    # states it.
+    gate_rules:
+      - { rule: min_entries, value: 5 }

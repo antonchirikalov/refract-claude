@@ -90,6 +90,24 @@ class MinLengthRule(BaseModel):
     value: int = Field(ge=0)
 
 
+class MinEntriesRule(BaseModel):
+    """Content rule for ``kind: dir``: at least N entries must be present (SPEC §5).
+
+    The sibling of ``min_length`` for directory artifacts. Existence and non-emptiness
+    are already checked, and that is exactly the hole: a step that owed four figures and
+    produced one passes a non-empty directory. The node that knows how many it asked for
+    states the number (``gate_rules``), and the count stops being a thing a reader has
+    to notice.
+
+    Dot-entries do not count, as everywhere else in the engine: a directory holding only
+    a ``.keep`` is not content.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    rule: Literal["min_entries"]
+    value: int = Field(ge=1)
+
+
 class CitationClosureRule(BaseModel):
     """Content rule: the document's numbered source list has to hold together.
 
@@ -118,7 +136,9 @@ class CitationClosureRule(BaseModel):
 
 
 Rule = Annotated[
-    Union[RegexRule, ForbidRegexRule, MinLengthRule, CitationClosureRule],
+    Union[
+        RegexRule, ForbidRegexRule, MinLengthRule, MinEntriesRule, CitationClosureRule
+    ],
     Field(discriminator="rule"),
 ]
 

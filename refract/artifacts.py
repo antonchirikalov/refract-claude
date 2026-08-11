@@ -17,7 +17,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from refract.models.types import ItemInfo, Rule, TypeKind
+from refract.models.types import ItemInfo, MinEntriesRule, Rule, TypeKind
 from refract.registry import ResolvedType, apply_rules, measure_rules
 
 # --- the single linking helper (SPEC §10; Windows symlink fallback) --------
@@ -215,6 +215,15 @@ def check_port(output_dir: Path | str, spec: GatePort) -> PortGateResult:
             # a directory that passed with one file is exactly the "silently thin
             # output" a run never reported (SPEC §10.2)
             measures = {"entries": len(content)}
+            # `min_entries` closes it where the caller knows the number: a step that owed
+            # four figures and produced one is a failure, not a thin pass
+            for rule in spec.rtype.rules + list(spec.extra_rules):
+                if isinstance(rule, MinEntriesRule):
+                    measures["min_entries"] = rule.value
+                    if len(content) < rule.value:
+                        problems.append(
+                            f"min_entries {rule.value} not met (got {len(content)})"
+                        )
         else:
             size = path.stat().st_size
             if size == 0:

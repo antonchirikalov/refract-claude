@@ -22,30 +22,64 @@ you would have drawn — you brief the tool well and let it work.
    Take the labels from the article itself. If the text calls a matrix `Q`, the figure
    says `Q`; a figure that renames things the reader just learned is worse than no figure.
 
-3. Run the tool once per figure, from your working directory:
+3. Before the first run, check the tool is reachable and configured. `paperbanana
+   --version` must work, and these three variables must be set in your environment:
+   `SS_GATEWAY_COMMAND`, `SS_GATEWAY_WRAPPER`, `SS_GATEWAY_PROFILE`. If any of them is
+   missing, stop immediately and say which — three failed retries and a stack trace hide
+   that the step was never configured, and a missing gateway is not a defect you can fix
+   by rewriting a brief.
+
+   Point the temporary directory inside your own working directory first:
+
+   ```
+   mkdir -p figures-work/tmp output/illustration
+   export TMPDIR="$PWD/figures-work/tmp" TEMP="$TMPDIR" TMP="$TMPDIR"
+   ```
+
+   This is not tidiness. The tool hands each rendered image to its vision critic as a
+   file path, and the critic cannot read a path outside the directory it runs in: with
+   the system temp dir it reports "access to the temp path was blocked" and reviews the
+   *description* instead of the *picture*, which is the whole value of the loop.
+
+4. Run the tool once per figure, from your working directory:
 
    ```
    paperbanana generate \
-     --input  figure-<slug>.txt \
+     --input figure-<slug>.txt \
      --caption "<the placeholder's caption>" \
-     --output output/illustration/<slug>.png \
-     --auto --max-iterations 3 \
-     --vlm-provider claude_code \
+     --output-dir figures-work \
+     --iterations 2 \
+     --vlm-provider claude_code --vlm-model sonnet \
      --image-provider ss_gateway
    ```
 
-   `--output` is where the PNG must land — that path, exactly, so the filename matches
-   the placeholder. Never write outside your working directory, and never pass an
-   absolute path: everything you touch is relative to where you already are.
+   Both model flags are required. `--vlm-provider claude_code` alone does NOT set the
+   model: the tool then takes whatever model its own configuration names, which may
+   belong to a different provider entirely, and the call fails with an API error and
+   zero tokens.
 
-4. Check the file exists and is not empty before moving to the next figure. If the
-   command fails, read its output: a missing tool, an unreachable gateway and a rejected
-   prompt are three different problems and only the last one is yours to fix. Retry a
-   failed figure once with a shorter, more concrete brief; if it fails again, record the
-   failure and continue with the remaining figures — a partial set of real figures beats
-   an aborted step.
+   Never pass an absolute path and never write outside your working directory.
 
-5. Write `output/illustration/manifest.json`:
+5. The tool does **not** write to a filename you choose. It creates
+   `figures-work/run_<timestamp>/final_output.png` (plus its intermediate images and
+   critic notes, which are worth keeping — they stay in the step and are archived with
+   it). Copy the final image to the name the article's placeholder demands:
+
+   ```
+   cp figures-work/run_*/final_output.png output/illustration/<slug>.png
+   ```
+
+   Copy the run that just finished, not the newest match blindly — with several figures
+   there will be several run directories. Check the file exists and is not empty before
+   moving to the next figure.
+
+   If the command fails, read its output: a missing tool, an unreachable gateway and a
+   rejected prompt are three different problems and only the last one is yours to fix.
+   Retry a failed figure once with a shorter, more concrete brief; if it fails again,
+   record the failure and continue with the remaining figures — a partial set of real
+   figures beats an aborted step.
+
+6. Write `output/illustration/manifest.json`:
 
    ```json
    {
@@ -55,7 +89,8 @@ you would have drawn — you brief the tool well and let it work.
          "caption": "<caption from the article, verbatim>",
          "file": "attention-qkv.png",
          "command": "<the exact command you ran>",
-         "iterations": 3,
+         "run_dir": "figures-work/run_20260811_134634_f86186",
+         "iterations": 2,
          "status": "ok"
        }
      ],
