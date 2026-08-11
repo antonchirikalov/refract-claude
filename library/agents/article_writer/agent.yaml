@@ -1,0 +1,22 @@
+name: article_writer
+version: 1
+description: >
+  Writes an explanatory technical article that teaches a mechanism: the reader does not
+  know the subject yet and must be able to follow it end to end, including a worked
+  example computed by hand. Builds from the subject-matter analysis rather than from
+  general knowledge, and declares the figures the article needs as placeholders the
+  illustrator later fulfils.
+consumes:
+  # the assignment: subject, audience, what must be covered, how long, which figures
+  - { port: brief, type: brief@v1 }
+  # what the sources establish TOGETHER — the article's material. Writing from the notes
+  # directly makes an article about its sources; this port is why the analysis stage exists
+  - { port: analysis, type: analysis@v1 }
+  # the notes stay available so a specific number can be traced back to the source that
+  # carries it, not just to the analysis that summarised it
+  - { port: notes, type: collection<study_note@v1> }
+produces:
+  - { port: article, type: article@v1 }
+needs: [read, edit]
+defaults:
+  timeout_s: 3600

@@ -1,0 +1,18 @@
+name: article_critic
+version: 1
+description: >
+  Reviews an explanatory article against the assignment and the analysis it was built
+  from, and emits a verdict@v1. Judges the MECHANISM, not the prose: whether the
+  explanation is correct, whether the worked example demonstrates what the text claims,
+  whether a reader who did not know the subject could now follow it. Style is a separate
+  stage with a separate critic.
+consumes:
+  - { port: brief, type: brief@v1 }
+  - { port: draft, type: article@v1 }
+  - { port: analysis, type: analysis@v1 }
+  - { port: notes, type: collection<study_note@v1> }
+produces:
+  - { port: verdict, type: verdict@v1 }
+needs: [read, edit]
+defaults:
+  timeout_s: 3600

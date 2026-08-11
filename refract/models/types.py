@@ -49,6 +49,39 @@ class RegexRule(BaseModel):
         return self
 
 
+class ForbidRegexRule(BaseModel):
+    """Content rule: a regex that must NOT be found (SPEC §5).
+
+    The mirror of ``regex``, and the rule mechanical style defects need: every
+    check that can be counted should cost zero tokens rather than a review round.
+    A hyphen standing in for a dash, straight quotes in Russian prose, a calque
+    from a maintained list — all of them are "this must not appear", and asking a
+    model nicely to avoid them is exactly the probabilistic enforcement the spec
+    forbids for anything countable.
+
+    ``max_hits`` allows a deliberate exception zone (an ironic aside addressing the
+    reader as "ты" in an article written as "вы"): 0 means the pattern must be
+    absent, N tolerates up to N occurrences.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    rule: Literal["forbid_regex"]
+    pattern: str
+    flags: str | None = None
+    max_hits: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_regex(self) -> "ForbidRegexRule":
+        for ch in self.flags or "":
+            if ch not in _ALLOWED_REGEX_FLAGS:
+                raise ValueError(f"unknown regex flag: {ch!r}")
+        try:
+            re.compile(self.pattern)
+        except re.error as e:
+            raise ValueError(f"invalid regex pattern {self.pattern!r}: {e}") from e
+        return self
+
+
 class MinLengthRule(BaseModel):
     """Content rule: minimum character count (SPEC §5)."""
 
@@ -85,7 +118,7 @@ class CitationClosureRule(BaseModel):
 
 
 Rule = Annotated[
-    Union[RegexRule, MinLengthRule, CitationClosureRule],
+    Union[RegexRule, ForbidRegexRule, MinLengthRule, CitationClosureRule],
     Field(discriminator="rule"),
 ]
 

@@ -255,7 +255,7 @@ def build() -> tuple[object, Path]:
             {
                 "servers": {
                     name: {"command": ["true"]}
-                    for name in ("tavily-remote", "pdf-reader", "paperbanana")
+                    for name in ("tavily-remote", "pdf-reader")
                 }
             }
         ),

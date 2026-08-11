@@ -101,19 +101,40 @@ def test_extract_pipeline_validates(tmp_path: Path) -> None:
     assert graph.order == ["scan", "extract", "write"]
 
 
+# An agent whose CRITERIA are tokens of one language, not merely whose output is in it.
+# The style critic's rules ARE Russian strings — the calque list, the «ты» forms, the
+# quotation marks it replaces; translating them would not generalise the agent, it would
+# delete its content. The exemption is per agent and deliberately narrow: everything else
+# stays English, because the rule below exists for a real defect.
+_LANGUAGE_SPECIFIC_AGENTS = {"article_stylist"}
+
+
 def test_shipped_prompts_and_specs_are_english() -> None:
     """Prompts are English even when the document they produce is not (§6).
 
     An agent's output language comes from the brief; hardcoding it in the package
     makes the agent single-assignment. A live run shipped four agents written in
     Ukrainian, which read as if the archetype only did Ukrainian legal research.
+
+    The exception is an agent whose subject IS a language (see the set above): a critic
+    of Russian prose cannot state «стоит отметить» in English. Its `agent.yaml`
+    description has to say so, so the exemption is visible where the agent is chosen.
     """
     import re
 
     cyrillic = re.compile(r"[А-Яа-яЁёІіЇїЄєҐґ]")
     offenders = []
     for path in sorted((LIBRARY / "agents").glob("*/*.md")):
+        if path.parent.name in _LANGUAGE_SPECIFIC_AGENTS:
+            continue
         hits = cyrillic.findall(path.read_text(encoding="utf-8"))
         if hits:
             offenders.append((path.parent.name, path.name, len(hits)))
     assert offenders == [], offenders
+
+
+def test_language_specific_agents_declare_it_in_their_contract() -> None:
+    """The exemption above must be legible from the package, not only from this test."""
+    for name in _LANGUAGE_SPECIFIC_AGENTS:
+        spec = (LIBRARY / "agents" / name / "agent.yaml").read_text(encoding="utf-8")
+        assert "Russian" in spec, name

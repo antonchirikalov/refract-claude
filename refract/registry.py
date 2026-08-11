@@ -22,6 +22,7 @@ from refract.models.types import (
     ArtifactTypeDef,
     ArtifactTypesFile,
     CitationClosureRule,
+    ForbidRegexRule,
     MinLengthRule,
     RegexRule,
     Rule,
@@ -161,6 +162,18 @@ def apply_rules(rules: Sequence[Rule], text: str) -> list[str]:
                 flags |= _REGEX_FLAGS.get(ch, 0)
             if re.search(rule.pattern, text, flags) is None:
                 failures.append(f"regex {rule.pattern!r} not found")
+        elif isinstance(rule, ForbidRegexRule):
+            flags = 0
+            for ch in rule.flags or "":
+                flags |= _REGEX_FLAGS.get(ch, 0)
+            hits = len(re.findall(rule.pattern, text, flags))
+            if hits > rule.max_hits:
+                allowed = (
+                    "" if rule.max_hits == 0 else f" (up to {rule.max_hits} allowed)"
+                )
+                failures.append(
+                    f"forbidden pattern {rule.pattern!r} found {hits} time(s){allowed}"
+                )
         elif isinstance(rule, MinLengthRule):
             if len(text) < rule.value:
                 failures.append(f"min_length {rule.value} not met (got {len(text)})")
@@ -182,12 +195,20 @@ def measure_rules(rules: Sequence[Rule], text: str) -> dict[str, object]:
     """
     measures: dict[str, object] = {"chars": len(text)}
     regexes: dict[str, bool] = {}
+    forbidden: dict[str, int] = {}
     for rule in rules:
         if isinstance(rule, RegexRule):
             flags = 0
             for ch in rule.flags or "":
                 flags |= _REGEX_FLAGS.get(ch, 0)
             regexes[rule.pattern] = re.search(rule.pattern, text, flags) is not None
+        elif isinstance(rule, ForbidRegexRule):
+            flags = 0
+            for ch in rule.flags or "":
+                flags |= _REGEX_FLAGS.get(ch, 0)
+            # a count, not a boolean: "passed with two of the three allowed" is the
+            # kind of near-miss `refract explain` exists to surface
+            forbidden[rule.pattern] = len(re.findall(rule.pattern, text, flags))
         elif isinstance(rule, MinLengthRule):
             measures["min_length"] = rule.value
         elif isinstance(rule, CitationClosureRule):
@@ -196,6 +217,8 @@ def measure_rules(rules: Sequence[Rule], text: str) -> dict[str, object]:
                 measures["citations"] = facts
     if regexes:
         measures["regex"] = regexes
+    if forbidden:
+        measures["forbidden"] = forbidden
     return measures
 
 

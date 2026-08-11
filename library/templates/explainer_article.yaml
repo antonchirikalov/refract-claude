@@ -1,0 +1,137 @@
+version: "0.1"
+name: explainer_article
+
+# Explainer mode: a technical article that TEACHES a mechanism, from a topic rather
+# than a documents folder. Sources are found on the network and read, an analyst
+# reconciles them, then a writer builds the article under a critic — with a verifier
+# between them, because in an explainer the fragile part is arithmetic, not citations:
+# a worked example whose numbers do not add up destroys the article's credibility the
+# way a fabricated footnote destroys a report's.
+#
+# After the content holds up, two more stages the report archetype does not have: a
+# style critic that hunts machine-written patterns (its findings are PROPOSALS the
+# human accepts or declines at a checkpoint — an author's voice is never rewritten
+# silently), and an illustrator that fulfils the figure placeholders the article
+# itself declared.
+input_mode: brief
+
+# The style stage parks the run: the stylist reports, the human decides. Editing the
+# findings file in place IS the acceptance mechanism (SPEC §21) — no separate UI.
+checkpoints: [style]
+
+nodes:
+  - id: brief
+    type: builtin/brief
+
+  - id: find
+    type: discover
+    agent: source_finder@1
+    inputs: { brief: brief.brief }
+    # Lower than a report's floor on purpose: an explainer needs the primary paper
+    # and a few good expositions, not a shelf. What it must NOT do is invent the
+    # formula, so the sources that matter are the ones carrying dimensions and scale.
+    params: { min_sources: 12 }
+
+  - id: study
+    type: agent
+    agent: study_extractor@1
+    map: find.sources
+    # the brief is broadcast to every item step: language and what counts as a fact
+    # worth capturing come from the assignment
+    inputs: { brief: brief.brief }
+    # min_ok stays close to the shelf's size on purpose. A threshold far below it does
+    # not protect the article, it hides the loss: a live run once reported `done` with
+    # 18 notes taken from a shelf of 77, and which 18 survived was an accident of
+    # scheduling order. Two unreadable sources out of twelve are tolerable; six are a
+    # different article.
+    params: { workers: 3, min_ok: 10 }
+
+  - id: analyse
+    type: agent
+    # Between reading and writing: reconciles what the sources agree on (the formula,
+    # the role of each projection) and where they differ (notation, whether the scale
+    # is explained as variance control or as a magnitude fix). Without this stage the
+    # writer paraphrases whichever source it read last.
+    agent: domain_analyst@1
+    inputs: { brief: brief.brief, notes: study.note }
+    params: { model: claude/opus }
+
+  - id: write
+    type: loop
+    params: { max_rounds: 3 }
+    body:
+      # A CHAIN, not one agent: the writer states the mechanism and works the example,
+      # then the verifier RECOMPUTES that example and corrects the numbers in place.
+      # Arithmetic cannot be checked by reading it — the verifier runs the numbers.
+      # Only the first element gets the critic's remarks (SPEC §10.3); the last
+      # element's output is the round's draft, so the critic judges verified text.
+      - agent: article_writer@1
+        model: claude/opus
+        inputs:
+          brief: brief.brief
+          analysis: analyse.analysis
+          notes: study.note
+      - agent: example_verifier@1
+        model: claude/sonnet
+        inputs:
+          draft: "@prev"
+          brief: brief.brief
+    critic:
+      # Judges the mechanism, not the prose: whether Q/K/V roles are stated
+      # correctly, whether the scale is explained rather than asserted, whether the
+      # example actually demonstrates what the text claims, whether every figure the
+      # article promises is one a reader would need.
+      agent: article_critic@1
+      model: claude/opus
+      inputs:
+        brief: brief.brief
+        draft: "@body"
+        analysis: analyse.analysis
+        notes: study.note
+    outputs: { article: "@body" }
+
+  - id: style
+    type: agent
+    # The ported article critic, in REPORT mode. Produces findings, not a rewrite:
+    # layer 1 is mechanical (dashes, quotes, calques, вы/ты) and layer 2 is the
+    # machine-pattern hunt (impersonal passive, punctuation overload, three actors in
+    # one sentence, "не X, а Y" chains, uniform sentence rhythm). Every finding
+    # carries quote → reason → verdict → было/стало, and `decision: pending`.
+    agent: article_stylist@1
+    inputs: { article: write.article, brief: brief.brief }
+    # judging a whole article against narrow criteria is the work a weak model does
+    # badly: it either invents findings to look busy or reports three and stops
+    params: { model: claude/opus }
+
+  - id: restyle
+    type: agent
+    # Applies ONLY the findings the human marked `accept` at the checkpoint above.
+    # A rejected finding is not "applied anyway because it was probably right".
+    agent: style_editor@1
+    inputs:
+      article: write.article
+      findings: style.findings
+    # applying a decided list is mechanical work — the cheap model is the right one
+    params: { model: claude/sonnet }
+    # Mechanical checks the editor must not leave behind. Only patterns that CANNOT
+    # occur inside code: this article carries python and formulas, and a flat regex
+    # cannot exclude fenced blocks, so `x = a - b` would read as a hyphen-for-dash and
+    # `print("привет")` as straight quotes in prose. Typography therefore stays with
+    # the stylist's report until there is a markdown-aware layer that knows where the
+    # code is; calques are safe here — no code block contains «стоит отметить».
+    gate_rules:
+      - { rule: forbid_regex, pattern: "стоит отметить|важно понимать|давайте разберём", flags: "i" }
+      - { rule: forbid_regex, pattern: "погрузимся в|ключевой вывод|в заключение", flags: "i" }
+      - { rule: forbid_regex, pattern: "валидиру|имплементиру|хендлит|репортит", flags: "i" }
+
+  - id: figures
+    type: agent
+    # Fulfils the figure placeholders the article declared: for every
+    # ![подпись](figures/<slug>.png) it runs the figgybanana CLI once and writes
+    # output/illustration/<slug>.png. The drawing judgement (planner, stylist,
+    # visualiser, vision critic) lives inside that tool — this step is execution,
+    # which is why it will become a builtin node once builtins can consume an input.
+    agent: illustrator@1
+    inputs: { article: restyle.article }
+    # Four diagrams through an external tool with its own refinement loop: generous.
+    params: { timeout_s: 3600 }

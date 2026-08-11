@@ -42,7 +42,7 @@ def _ctx() -> ValidationContext:
         available_providers={"claude"},
         default_model="claude/sonnet",
         # the servers the shipped agents need (~/.refract/mcp.yaml declares these)
-        known_mcp_servers={"tavily-remote", "pdf-reader", "paperbanana"},
+        known_mcp_servers={"tavily-remote", "pdf-reader"},
     )
 
 
@@ -81,6 +81,7 @@ def test_library_agents_load_without_errors() -> None:
         "research",
         "requirements_to_design",
         "analytic_report",
+        "explainer_article",
     ],
 )
 def test_template_validates(name: str) -> None:
@@ -150,6 +151,48 @@ _ANALYTIC_REPORT = (
 
 # Scripted outputs keyed by fnmatch step-id pattern; filenames match each agent's
 # primary produce PORT (SPEC §10.4), not the loop output alias.
+# --- explainer_article fixtures ---------------------------------------------
+# article@v1 gates on three things: an H1 at the very start, at least one figure
+# placeholder (the contract the illustrator fulfils), and a genre floor of 6000 chars.
+# The prose deliberately contains none of the calques the `restyle` node forbids.
+_ARTICLE = (
+    "# Механизм внимания\n\n"
+    "![Одна матрица X превращается в Q, K и V тремя проекциями](figures/x-to-qkv.png)\n\n"
+    + (
+        "Каждый токен получает три вектора, и каждый из них отвечает за свою роль "
+        "в вычислении. Скалярное произведение показывает, насколько один вектор "
+        "похож на другой, а нормировка удерживает значения в разумных пределах. "
+    )
+    * 40
+)
+# style_findings@v1: a clean text is a real outcome — the schema requires the summary
+# and the list, not that the list be non-empty
+_FINDINGS = json.dumps(
+    {
+        "summary": "Текст ровный, механика чистая, ритм без серий одинаковых фраз.",
+        "counters": {"dash": 0, "quotes": 0, "address_ty": 0},
+        "findings": [],
+    },
+    ensure_ascii=False,
+)
+_PNG = b"\x89PNG" + b"0" * 64
+_MANIFEST = json.dumps(
+    {
+        "figures": [
+            {
+                "slug": "x-to-qkv",
+                "caption": "Одна матрица X превращается в Q, K и V тремя проекциями",
+                "file": "x-to-qkv.png",
+                "command": "paperbanana generate --input figure-x-to-qkv.txt ...",
+                "status": "ok",
+            }
+        ],
+        "failed": [],
+    },
+    ensure_ascii=False,
+)
+
+
 _SCENARIOS: dict[str, dict[str, dict[str, str]]] = {
     "extract": {
         "extract:*": {"extract.json": _EXTRACT},
@@ -185,6 +228,25 @@ _SCENARIOS: dict[str, dict[str, dict[str, str]]] = {
         "report.body:*": {"report.md": _ANALYTIC_REPORT},
         "report.critic:*": {"verdict.json": _APPROVED},
     },
+    "explainer_article": {
+        # min_sources: 12 — the floor the finder must clear or the node fails
+        "find": {
+            f"found/source-{i}.md": f"# Source {i}\nSubstance.\n" for i in range(1, 13)
+        },
+        "study:*": {"note.json": _NOTE},
+        "analyse": {"analysis.json": _ANALYSIS},
+        # a CHAIN body: the writer drafts, the verifier hands back the same article with
+        # its arithmetic corrected — two step ids per round, not one
+        "write.body1:*": {"article.md": _ARTICLE},
+        "write.body2:*": {"article.md": _ARTICLE},
+        "write.critic:*": {"verdict.json": _APPROVED},
+        "style": {"findings.json": _FINDINGS},
+        "restyle": {"article.md": _ARTICLE},
+        "figures": {
+            "illustration/x-to-qkv.png": _PNG,
+            "illustration/manifest.json": _MANIFEST,
+        },
+    },
     "requirements_to_design": {
         "extract:*": {"extract.json": _EXTRACT},
         "refine.body:*": {"requirements.md": _REQ},
@@ -219,6 +281,7 @@ async def _no_sleep(_seconds: float) -> None:
         "research",
         "requirements_to_design",
         "analytic_report",
+        "explainer_article",
     ],
 )
 def test_template_runs_end_to_end(name: str, tmp_path: Path) -> None:
@@ -309,3 +372,93 @@ def test_template_runs_end_to_end(name: str, tmp_path: Path) -> None:
         # the winner_model binding resolved and the final loop assembled its output
         assert ledger.get_node("choose").winner_model == "claude/opus"
         assert (run_dir / "steps" / "sd_refine" / "_out" / "design.md").exists()
+
+
+def _run_explainer(tmp_path, *, restyle_article: str):
+    """Run explainer_article with the checkpoint lifted, so the tail executes.
+
+    The parametrized e2e stops at the checkpoint by design (SPEC §21), which leaves
+    `restyle` and `figures` — the calque gate and the illustration directory — with no
+    coverage at all. Lifting the checkpoint here exercises them without pretending the
+    checkpoint is not part of the template.
+    """
+    agents, _ = load_agents(LIBRARY)
+    registry = ArtifactRegistry.load(LIBRARY)
+    raw = Pipeline.model_validate(
+        yaml.safe_load((TEMPLATES / "explainer_article.yaml").read_text("utf-8"))
+    )
+    resolved = build_resolved(
+        raw, agents=agents, overrides={}, default_model="claude/sonnet"
+    )
+    resolved["checkpoints"] = []
+    pipeline = Pipeline.model_validate(resolved)
+
+    proj_in = tmp_path / "input"
+    proj_in.mkdir()
+    (proj_in / "brief.md").write_text("Механизм внимания.", encoding="utf-8")
+    run_dir = tmp_path / "run"
+    (run_dir / "snapshot" / "agents").mkdir(parents=True)
+    for ref in agents:
+        shutil.copytree(
+            LIBRARY / "agents" / ref.split("@")[0],
+            run_dir / "snapshot" / "agents" / ref,
+        )
+    ledger = Ledger.create(
+        run_dir,
+        run_id="run_expl",
+        pipeline="explainer_article",
+        node_ids=[n.id for n in pipeline.nodes],
+        created_at="T0",
+    )
+    scenario = dict(_SCENARIOS["explainer_article"])
+    scenario["restyle"] = {"article.md": restyle_article}
+    runtime = MockRuntime(
+        {pat: [ScriptedResponse(files=f)] for pat, f in scenario.items()}
+    )
+    status = asyncio.run(
+        run_pipeline(
+            run_dir,
+            pipeline=pipeline,
+            agents=agents,
+            registry=registry,
+            runtime=runtime,
+            ledger=ledger,
+            events=EventWriter(run_dir),
+            project_input_dir=proj_in,
+            clock=lambda: "T",
+            sleeper=_no_sleep,
+        )
+    )
+    return status, ledger, run_dir
+
+
+def test_explainer_tail_produces_figures_for_the_declared_placeholders(tmp_path: Path):
+    status, ledger, run_dir = _run_explainer(tmp_path, restyle_article=_ARTICLE)
+    assert status is RunStatus.completed, {
+        k: (v.status.value, v.error) for k, v in ledger.state.nodes.items()
+    }
+    figures = run_dir / "steps" / "figures" / "main" / "output" / "illustration"
+    # the slug in the article's placeholder is the filename the illustrator must produce
+    assert (figures / "x-to-qkv.png").exists()
+    manifest = json.loads((figures / "manifest.json").read_text("utf-8"))
+    assert manifest["figures"][0]["slug"] == "x-to-qkv"
+    # the loop body is a CHAIN: two steps per round, in order
+    assert "write.body1:r1" in ledger.state.steps
+    assert "write.body2:r1" in ledger.state.steps
+
+
+def test_explainer_calque_gate_bites_on_the_editor(tmp_path: Path):
+    """The node's own terms, enforced mechanically: an editor that leaves a calque
+    behind has not finished, and no critic round should be spent saying so."""
+    dirty = _ARTICLE.replace(
+        "Каждый токен получает", "Стоит отметить, что каждый токен получает", 1
+    )
+    status, ledger, _ = _run_explainer(tmp_path, restyle_article=dirty)
+    assert status is RunStatus.failed
+    restyle = ledger.get_node("restyle")
+    assert restyle is not None and restyle.status is NodeStatus.failed
+    # and the step that failed says which pattern it was, not just "invalid"
+    step = ledger.get_step("restyle")
+    assert step is not None and "стоит отметить" in (step.error or "").lower()
+    # the figures node never ran: the article it would illustrate did not pass
+    assert ledger.get_node("figures").status is NodeStatus.skipped

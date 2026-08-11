@@ -7,10 +7,12 @@
 # the run env. The CLI launches each MCP subprocess with ONLY this declared `env`,
 # so pass any key the server needs explicitly.
 #
-# The shipped library needs exactly three servers:
-#   tavily-remote  -> requirements_writer, solution_designer, arch_probe (web research)
-#   pdf-reader     -> source_processor (reading PDF sources)
-#   paperbanana    -> illustrator (image generation)
+# The shipped library needs exactly two servers:
+#   tavily-remote  -> requirements_writer, solution_designer, arch_probe, source_finder
+#   pdf-reader     -> source_processor, source_finder (reading PDF sources)
+#
+# Figures are NOT an MCP server: the illustrator runs the figgybanana CLI, which carries
+# its own agents and its own image backend. Nothing to declare here for it.
 
 servers:
   # Web research (Tavily). Use YOUR launch command. If it's a remote HTTP server
@@ -25,10 +27,3 @@ servers:
     command: ["npx", "-y", "@your-org/pdf-reader-mcp"]   # <-- replace
     env: {}
 
-  # Image generation for illustrator — verified working end to end.
-  paperbanana:
-    command: ["uvx", "--from", "paperbanana[mcp,openai]", "paperbanana-mcp"]
-    env:
-      OPENAI_API_KEY: "{env:OPENAI_API_KEY}"
-      OPENAI_VLM_MODEL: "gpt-5.2"
-      OPENAI_IMAGE_MODEL: "gpt-image-2"

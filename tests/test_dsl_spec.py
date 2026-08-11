@@ -73,7 +73,7 @@ def test_spec_example_validates() -> None:
         known_providers={"kimi", "openai"},
         available_providers={"kimi", "openai"},
         default_model="kimi/k3",
-        known_mcp_servers={"tavily-remote", "pdf-reader", "paperbanana"},
+        known_mcp_servers={"tavily-remote", "pdf-reader"},
     )
     order, findings = validate_pipeline(pipeline, ctx)
     blocking = [

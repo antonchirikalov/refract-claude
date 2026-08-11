@@ -34,8 +34,38 @@ types:
   # Architecture-probe report: workshop-ready discovery questions grounded in
   # the source material (spectra arch_probe). Markdown document.
   arch_report@v1: { kind: file, format: markdown }
-  # Generated publication illustrations + a regeneration manifest (spectra illustrator).
-  # Produced via the paperbanana MCP server (see docs/illustrator-paperbanana-mcp.md).
+  # An explanatory technical article: teaches a mechanism to a reader who does not know
+  # it yet. Genre floor only — the rules here say "this is an article", not "this
+  # article is finished".
+  #
+  # Deliberately NOT here: the typographic and calque checks. They belong to the node
+  # that runs after the stylist (`gate_rules` with `forbid_regex`), because a writer's
+  # first draft legitimately still has them — a type-level ban would fail every round
+  # of the writing loop for a defect the pipeline fixes two nodes later.
+  article@v1:
+    kind: file
+    format: markdown
+    rules:
+      # anchored at the very start: front matter with invented metadata is a defect a
+      # gate settles, not something a critic should spend a round arguing about
+      - { rule: regex, pattern: "\\A#\\s+\\S" }
+      # a figure the article promises is a contract with the illustrator: the drawing
+      # step fulfils exactly these placeholders, by slug
+      - { rule: regex, pattern: '!\[[^\]]*\]\(figures/[a-z0-9-]+\.png\)' }
+      # genre floor: an explainer that fits in two screens has not explained anything.
+      # What a given assignment needs is the brief's business (`gate_rules` on the node)
+      - { rule: min_length, value: 6000 }
+  # A style critic's findings over one article: mechanical layer (dashes, quotes, forms
+  # of address, calques, term drift) and machine-pattern layer (impersonal passive,
+  # punctuation overload, three actors in one sentence, "не X, а Y" chains, uniform
+  # rhythm). Each finding carries quote → reason → before/after and a `decision` the
+  # human sets at the checkpoint: the author's voice is never rewritten silently.
+  style_findings@v1:
+    kind: file
+    format: json
+    schema: style_findings.schema.json
+  # Generated publication illustrations + a manifest recording each figure's caption
+  # and the exact command that produced it, so any figure can be regenerated.
   illustration@v1: { kind: dir }
   # Publish confirmation: page URL/id/version, attachment counts (spectra confluence_publisher).
   publication@v1: { kind: file, format: json }

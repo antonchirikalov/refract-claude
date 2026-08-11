@@ -34,8 +34,7 @@ def _app(monkeypatch: pytest.MonkeyPatch) -> AppConfig:
     mcp = McpFile.model_validate(
         {
             "servers": {
-                name: {"command": ["true"]}
-                for name in ("tavily-remote", "pdf-reader", "paperbanana")
+                name: {"command": ["true"]} for name in ("tavily-remote", "pdf-reader")
             }
         }
     )

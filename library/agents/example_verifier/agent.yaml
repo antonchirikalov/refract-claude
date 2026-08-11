@@ -1,0 +1,17 @@
+name: example_verifier
+version: 1
+description: >
+  Recomputes the worked example of an explanatory article and corrects its numbers in
+  place. The middle element of the writing loop: in an explainer the fragile part is
+  arithmetic, and arithmetic cannot be checked by reading it. Executes the computation
+  (python) and returns the same article with every figure it verified made consistent —
+  or, where the example is unsalvageable, replaced by one that holds.
+consumes:
+  - { port: draft, type: article@v1 }
+  - { port: brief, type: brief@v1 }
+produces:
+  - { port: article, type: article@v1 }
+# bash is what makes this agent honest: it runs the numbers instead of judging them
+needs: [read, edit, bash]
+defaults:
+  timeout_s: 1800

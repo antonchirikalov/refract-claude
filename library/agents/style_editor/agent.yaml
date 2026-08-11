@@ -1,0 +1,15 @@
+name: style_editor
+version: 1
+description: >
+  Applies the style findings a human accepted, and only those. A finding left `pending`
+  or marked `reject` is not applied "because it was probably right" — that is the whole
+  point of the checkpoint before this step. Edits surgically by before/after; never
+  rewrites a paragraph the findings did not name.
+consumes:
+  - { port: article, type: article@v1 }
+  - { port: findings, type: style_findings@v1 }
+produces:
+  - { port: article, type: article@v1 }
+needs: [read, edit]
+defaults:
+  timeout_s: 1800

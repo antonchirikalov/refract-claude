@@ -1,0 +1,124 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "style_findings@v1",
+  "description": "A style critic's findings over one Russian technical article. Findings are PROPOSALS: each carries `decision`, which the human sets at the checkpoint before an editor applies anything. Layer 1 is mechanical and countable (dashes, quotes, address, calques, term drift); layer 2 is the machine-pattern hunt (impersonal passive, punctuation overload, three actors in one sentence, chained «не X, а Y», uniform sentence rhythm).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["summary", "findings"],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "Three to five sentences: the state of the text and its main ailments. Not a list of findings — the diagnosis behind them."
+    },
+    "counters": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Exact counts for the mechanical layer, one key per rule (`dash`, `quotes`, `address_ty`, calque tokens). Counted with the search tool, not estimated: a rule whose count is a guess cannot be a gate later.",
+      "properties": {
+        "dash": { "type": "integer", "description": "Hyphens standing in for an em dash in prose." },
+        "quotes": { "type": "integer", "description": "Straight quotes around Russian prose instead of « »." },
+        "address_ty": { "type": "integer", "description": "«ты»-forms in a text written as «вы» (whitelist zones excluded)." }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "description": "One entry per defect. Empty is a valid, meaningful answer: a clean text by a criterion is reported as clean, never padded with invented findings.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id", "layer", "rule", "quote", "reason", "before", "after", "decision"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable id within this report, e.g. F-1. The human refers to it when accepting or declining."
+          },
+          "layer": {
+            "type": "integer",
+            "enum": [1, 2],
+            "description": "1 = mechanical (countable, safe to apply verbatim); 2 = stylistic (a judgement about the author's voice)."
+          },
+          "rule": {
+            "type": "string",
+            "description": "Which criterion fired: dash, quotes, ellipsis, address, calque, term_drift, passive_inanimate, punctuation_overload, three_actors, not_x_but_y, rhythm.",
+            "enum": [
+              "dash", "quotes", "ellipsis", "address", "calque", "term_drift",
+              "passive_inanimate", "punctuation_overload", "three_actors",
+              "not_x_but_y", "rhythm"
+            ]
+          },
+          "line": {
+            "type": "integer",
+            "description": "1-based line in the article, so the editor edits the right occurrence rather than the first textual match."
+          },
+          "quote": {
+            "type": "string",
+            "description": "The offending text verbatim — the evidence. Stated BEFORE the reasoning, never reconstructed from memory."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this violates the named criterion. Reasoning comes before the verdict, not after it."
+          },
+          "before": {
+            "type": "string",
+            "description": "Exact text to replace. Must occur in the article verbatim, or the editor cannot apply it safely."
+          },
+          "after": {
+            "type": "string",
+            "description": "The replacement. Preserves meaning, the article's terminology, and roughly the original length — a fix that inflates the sentence is a rewrite, not a fix."
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["error", "warn", "info"],
+            "description": "error: mechanically wrong (typography, calque with an exact Russian verb). warn: reads as machine-written. info: preference."
+          },
+          "decision": {
+            "type": "string",
+            "enum": ["pending", "accept", "reject"],
+            "description": "Set by the critic to `pending` and by the HUMAN at the checkpoint. The editor applies `accept` only; `pending` counts as not accepted."
+          },
+          "note": {
+            "type": "string",
+            "description": "Optional: why the human decided this way, or the critic's own uncertainty (e.g. a suspected deliberate stylisation zone worth asking about)."
+          }
+        }
+      }
+    },
+    "terms": {
+      "type": "array",
+      "description": "Terminology audit: one entry per special term of the article. Catches two defects a sentence-level pass cannot see — synonyms for one concept mixed without explanation, and a term used before it is introduced.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["term", "variants"],
+        "properties": {
+          "term": { "type": "string" },
+          "variants": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Every form the article uses for this one concept."
+          },
+          "first_use_line": { "type": "integer" },
+          "defined_line": {
+            "type": "integer",
+            "description": "Where the term is introduced. Greater than first_use_line means the reader met it before it was explained."
+          },
+          "recommendation": { "type": "string" }
+        }
+      }
+    },
+    "deliberate_zones": {
+      "type": "array",
+      "description": "Passages that break a rule on purpose (an ironic aside addressing the reader as «ты» in a text written as «вы»). Reported, not counted as defects — and worth asking the author about rather than silently fixing.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["line", "quote", "why"],
+        "properties": {
+          "line": { "type": "integer" },
+          "quote": { "type": "string" },
+          "why": { "type": "string" }
+        }
+      }
+    }
+  }
+}

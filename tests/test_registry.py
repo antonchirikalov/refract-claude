@@ -673,3 +673,62 @@ class TestMeasureRules:
         rule = CitationClosureRule(rule="citation_closure", list_heading="REFERENCES")
         measures = measure_rules([rule], "prose with no list at all")
         assert "citations" not in measures
+
+
+# --- forbid_regex: mechanical style defects are a gate, not a request -------
+
+
+class TestForbidRegex:
+    """Everything countable should cost zero tokens (SPEC §5)."""
+
+    def _rule(self, pattern: str, **kw: object):
+        from refract.models.types import ForbidRegexRule
+
+        return ForbidRegexRule(rule="forbid_regex", pattern=pattern, **kw)
+
+    def test_absent_pattern_passes(self) -> None:
+        from refract.registry import apply_rules
+
+        rule = self._rule(r"[^\n-]\s-\s[^\n-]")  # дефис в роли тире
+        assert apply_rules([rule], "Внимание — это взвешенная сумма.") == []
+
+    def test_present_pattern_fails_and_counts(self) -> None:
+        from refract.registry import apply_rules
+
+        rule = self._rule(r"[^\n-]\s-\s[^\n-]")
+        text = "Q - это запрос, K - ключ, V - значение."
+        problems = apply_rules([rule], text)
+        assert len(problems) == 1
+        assert "3 time(s)" in problems[0]
+
+    def test_max_hits_tolerates_a_deliberate_exception_zone(self) -> None:
+        """An ironic aside on «ты» in an article written as «вы» is not a defect."""
+        from refract.registry import apply_rules
+
+        rule = self._rule(r"\bтебе\b", max_hits=1)
+        assert apply_rules([rule], "Расскажу тебе по секрету. Далее только «вы».") == []
+        assert apply_rules([rule], "тебе раз, тебе два") != []
+
+    def test_flags_are_honoured(self) -> None:
+        from refract.registry import apply_rules
+
+        rule = self._rule(r"^давайте разберём", flags="mi")
+        assert apply_rules([rule], "Текст.\nДавайте разберём пример.") != []
+
+    def test_bad_pattern_is_rejected_at_load(self) -> None:
+        from pydantic import ValidationError
+
+        from refract.models.types import ForbidRegexRule
+
+        with pytest.raises(ValidationError):
+            ForbidRegexRule(rule="forbid_regex", pattern="[unclosed")
+        with pytest.raises(ValidationError):
+            ForbidRegexRule(rule="forbid_regex", pattern="x", flags="q")
+
+    def test_measured_as_a_count_even_when_passing(self) -> None:
+        """`refract explain` needs the near-miss, not just the verdict (SPEC §10.2)."""
+        from refract.registry import measure_rules
+
+        rule = self._rule(r"\bтебе\b", max_hits=2)
+        measures = measure_rules([rule], "тебе один раз")
+        assert measures["forbidden"] == {r"\bтебе\b": 1}

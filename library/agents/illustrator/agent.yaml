@@ -1,15 +1,20 @@
 name: illustrator
 version: 1
 description: >
-  Creates publication-ready illustrations for a solution design. Plans the figures
-  the document needs, generates each one through the paperbanana MCP server, and
-  emits a directory of images plus a manifest recording each figure's caption and
-  regeneration prompt. Image generation is an MCP tool (mcp:paperbanana), not a
-  local script — see docs/illustrator-paperbanana-mcp.md.
+  Fulfils the figure placeholders an article declared. For every
+  ![caption](figures/<slug>.png) in the text it runs the figgybanana CLI once and writes
+  output/illustration/<slug>.png, then records what was generated and with which command
+  so any figure can be regenerated unchanged. The drawing judgement — planning the
+  figure, styling it, looking at the render and correcting it — happens inside that
+  tool, which has its own visualiser/critic loop; this step is execution.
 consumes:
-  - { port: design_doc, type: design_doc@v1 }
+  - { port: article, type: article@v1 }
 produces:
   - { port: illustration, type: illustration@v1 }
-needs: [read, edit, "mcp:paperbanana"]
+# bash, because the work is invoking a CLI. A knowing exception: the workdir guard does
+# not match Bash, so on this step I1 rests on the prompt rather than on the hook. It
+# goes away when builtins can consume an input and the engine runs the tool itself.
+needs: [read, edit, bash]
 defaults:
-  timeout_s: 1800
+  # four diagrams through a tool that runs its own refinement loop per figure
+  timeout_s: 3600
