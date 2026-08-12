@@ -1204,3 +1204,83 @@ nodes:
         ctx = make_ctx(tmp_path, agents=self._AGENTS)
         _order, errors = validate_pipeline(pipeline, ctx)
         assert Code.E_GATE_RULES_SHAPE not in _codes(errors)
+
+
+# --- W_THRESHOLDS: a floor that only passes when the finder over-delivers ----
+
+
+class TestWThresholds:
+    """min_ok on a map node against min_sources of the discover node feeding it.
+
+    Two live runs paid for this: one demanded 10 notes from a shelf floored at 8 and
+    passed only because the search returned 16; another demanded 12 sources where the
+    finder's own anti-duplicate cap stopped it at 8, with every required point covered
+    twice over, and the node failed on the threshold.
+    """
+
+    def _agents(self):
+        return {
+            "finder@1": agent_spec(
+                "finder",
+                consumes=[{"port": "brief", "type": "brief@v1"}],
+                produces=[{"port": "found", "type": "found_sources@v1"}],
+            ),
+            "reader@1": agent_spec(
+                "reader",
+                consumes=[{"port": "source", "type": "source@v1"}],
+                produces=[{"port": "out", "type": "extract@v1"}],
+            ),
+        }
+
+    def _pipe(self, min_sources: int, min_ok: int):
+        return _pipeline(
+            f"""
+version: "0.1"
+name: p
+input_mode: brief
+nodes:
+  - id: brief
+    type: builtin/brief
+  - id: find
+    type: discover
+    agent: finder@1
+    inputs: {{ brief: brief.brief }}
+    params: {{ min_sources: {min_sources} }}
+  - id: study
+    type: agent
+    agent: reader@1
+    map: find.sources
+    params: {{ min_ok: {min_ok} }}
+"""
+        )
+
+    def test_min_ok_above_the_floor_warns(self, tmp_path: Path) -> None:
+        ctx = make_ctx(tmp_path, agents=self._agents())
+        _order, errors = validate_pipeline(self._pipe(8, 10), ctx)
+        assert Code.W_THRESHOLDS in _codes(errors)
+        message = next(e.message for e in errors if e.code is Code.W_THRESHOLDS)
+        assert "min_ok 10 exceeds min_sources 8" in message
+
+    def test_min_ok_equal_to_the_floor_warns_about_zero_tolerance(
+        self, tmp_path: Path
+    ) -> None:
+        ctx = make_ctx(tmp_path, agents=self._agents())
+        _order, errors = validate_pipeline(self._pipe(6, 6), ctx)
+        assert Code.W_THRESHOLDS in _codes(errors)
+        assert "one unusable source" in next(
+            e.message for e in errors if e.code is Code.W_THRESHOLDS
+        )
+
+    def test_min_ok_below_the_floor_is_silent(self, tmp_path: Path) -> None:
+        ctx = make_ctx(tmp_path, agents=self._agents())
+        _order, errors = validate_pipeline(self._pipe(6, 5), ctx)
+        assert Code.W_THRESHOLDS not in _codes(errors)
+
+    def test_it_is_a_warning_and_does_not_block_the_run(self, tmp_path: Path) -> None:
+        """min_sources is a FLOOR, so a larger min_ok is not provably unsatisfiable —
+        it is a bet on the finder over-delivering. A bet is a warning, not an error."""
+        ctx = make_ctx(tmp_path, agents=self._agents())
+        order, errors = validate_pipeline(self._pipe(8, 10), ctx)
+        blocking = [e for e in errors if not e.code.value.startswith("W_")]
+        assert blocking == [], blocking
+        assert order  # the graph still resolves and would run

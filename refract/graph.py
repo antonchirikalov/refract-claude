@@ -906,6 +906,7 @@ class _Validator:
     def _phase_warnings(self) -> None:
         self._warn_cache()
         self._warn_security()
+        self._warn_thresholds()
 
     def _warn_cache(self) -> None:
         for node in self.nodes.values():
@@ -913,6 +914,49 @@ class _Validator:
             if cache:
                 self.err(
                     Code.W_CACHE_UNSUPPORTED, node.id, "cache is unsupported in v0.1"
+                )
+
+    def _warn_thresholds(self) -> None:
+        """A map node's ``min_ok`` against the floor of the discover node feeding it.
+
+        ``min_sources`` is a FLOOR, so a larger ``min_ok`` is not provably unsatisfiable
+        — it passes whenever the finder over-delivers, which is why this is a warning and
+        not an error. It is still a latent failure: the run's success depends on the
+        finder exceeding its own floor, and when the finder is capped against duplicates
+        (a textbook subject has one primary source and a pile of restatements) that is a
+        bet the pipeline loses. Equality is the same bet with zero tolerance: one
+        unreadable page fails a node that had everything it needed.
+
+        Two live runs paid for this. One demanded 10 notes from a shelf floored at 8 and
+        only passed because the search happened to return 16. Another demanded 12 sources
+        on a subject where the finder's own cap stopped it at 8 — every required point
+        covered twice over, and the node failed on the threshold.
+        """
+        for node in self.nodes.values():
+            if not isinstance(node, AgentNode) or not node.map:
+                continue
+            source_id = node.map.split(".")[0]
+            source = self.nodes.get(source_id)
+            if not isinstance(source, DiscoverNode):
+                continue
+            min_ok = node.params.min_ok
+            floor = source.params.min_sources
+            if min_ok > floor:
+                self.err(
+                    Code.W_THRESHOLDS,
+                    node.id,
+                    f"min_ok {min_ok} exceeds min_sources {floor} of {source_id!r}: "
+                    "the node can only pass if the finder delivers above its floor",
+                )
+            elif min_ok == floor and floor > 1:
+                # Only when someone SET a non-trivial floor. Both params default to 1,
+                # and warning on the engine's own defaults would put a warning on every
+                # research pipeline out of the box — noise that devalues the real ones.
+                self.err(
+                    Code.W_THRESHOLDS,
+                    node.id,
+                    f"min_ok {min_ok} equals min_sources {floor} of {source_id!r}: "
+                    "one unusable source fails the node",
                 )
 
     def _warn_security(self) -> None:

@@ -799,3 +799,44 @@ class TestMinEntries:
 
         problems = apply_rules([self._rule(2)], "some text")
         assert problems and "kind=dir" in problems[0]
+
+
+# --- max_length: the ceiling belongs to the gate, not to a review round -----
+
+
+class TestMaxLength:
+    """A live run's critic spent a remark on length in all three of its rounds."""
+
+    def _rule(self, value: int):
+        from refract.models.types import MaxLengthRule
+
+        return MaxLengthRule(rule="max_length", value=value)
+
+    def test_within_the_ceiling_passes(self) -> None:
+        from refract.registry import apply_rules
+
+        assert apply_rules([self._rule(100)], "x" * 100) == []
+
+    def test_over_the_ceiling_fails_with_both_numbers(self) -> None:
+        from refract.registry import apply_rules
+
+        problems = apply_rules([self._rule(100)], "x" * 137)
+        assert problems == ["max_length 100 exceeded (got 137)"]
+
+    def test_measured_even_when_passing(self) -> None:
+        """`refract explain` needs "13 900 against a 14 000 ceiling", not just ok."""
+        from refract.registry import measure_rules
+
+        measures = measure_rules([self._rule(14000)], "x" * 13900)
+        assert measures["chars"] == 13900
+        assert measures["max_length"] == 14000
+
+    def test_pairs_with_min_length(self) -> None:
+        """A floor and a ceiling on one artifact: the genre and the assignment."""
+        from refract.models.types import MinLengthRule
+        from refract.registry import apply_rules
+
+        rules = [MinLengthRule(rule="min_length", value=10), self._rule(20)]
+        assert apply_rules(rules, "x" * 15) == []
+        assert len(apply_rules(rules, "x" * 5)) == 1
+        assert len(apply_rules(rules, "x" * 25)) == 1

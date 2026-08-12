@@ -18,6 +18,7 @@ claude-demo/
 # product. terror-report/evidence/ keeps the expensive artifacts of six deleted runs.
 tavily-smoke/
 terror-report/
+attn-article/
 
 # refract run outputs
 runs/

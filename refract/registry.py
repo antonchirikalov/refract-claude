@@ -23,6 +23,7 @@ from refract.models.types import (
     ArtifactTypesFile,
     CitationClosureRule,
     ForbidRegexRule,
+    MaxLengthRule,
     MinEntriesRule,
     MinLengthRule,
     RegexRule,
@@ -178,6 +179,9 @@ def apply_rules(rules: Sequence[Rule], text: str) -> list[str]:
         elif isinstance(rule, MinLengthRule):
             if len(text) < rule.value:
                 failures.append(f"min_length {rule.value} not met (got {len(text)})")
+        elif isinstance(rule, MaxLengthRule):
+            if len(text) > rule.value:
+                failures.append(f"max_length {rule.value} exceeded (got {len(text)})")
         elif isinstance(rule, CitationClosureRule):
             failures.extend(check_citation_closure(text, rule))
         elif isinstance(rule, MinEntriesRule):
@@ -216,6 +220,8 @@ def measure_rules(rules: Sequence[Rule], text: str) -> dict[str, object]:
             forbidden[rule.pattern] = len(re.findall(rule.pattern, text, flags))
         elif isinstance(rule, MinLengthRule):
             measures["min_length"] = rule.value
+        elif isinstance(rule, MaxLengthRule):
+            measures["max_length"] = rule.value
         elif isinstance(rule, CitationClosureRule):
             facts = measure_citations(text, rule)
             if facts is not None:

@@ -42,6 +42,7 @@ class Code(str, Enum):
     )
     W_CACHE_UNSUPPORTED = "W_CACHE_UNSUPPORTED"
     W_SECURITY = "W_SECURITY"
+    W_THRESHOLDS = "W_THRESHOLDS"
 
     @property
     def is_warning(self) -> bool:

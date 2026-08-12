@@ -90,6 +90,24 @@ class MinLengthRule(BaseModel):
     value: int = Field(ge=0)
 
 
+class MaxLengthRule(BaseModel):
+    """Content rule: maximum character count (SPEC §5).
+
+    The other half of ``min_length``, and it earned its place: a live run's critic spent
+    a remark on length in every one of its three rounds (18–20k, then 13k, then 13.65k
+    against a brief asking 8–12k) and the article shipped over the ceiling anyway. Length
+    is countable, so it belongs to the gate — a review round spent on a number is a round
+    not spent on the explanation.
+
+    A ceiling is per assignment, not per genre, so it normally lives in a node's
+    ``gate_rules`` rather than in the type.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    rule: Literal["max_length"]
+    value: int = Field(ge=1)
+
+
 class MinEntriesRule(BaseModel):
     """Content rule for ``kind: dir``: at least N entries must be present (SPEC §5).
 
@@ -137,7 +155,12 @@ class CitationClosureRule(BaseModel):
 
 Rule = Annotated[
     Union[
-        RegexRule, ForbidRegexRule, MinLengthRule, MinEntriesRule, CitationClosureRule
+        RegexRule,
+        ForbidRegexRule,
+        MinLengthRule,
+        MaxLengthRule,
+        MinEntriesRule,
+        CitationClosureRule,
     ],
     Field(discriminator="rule"),
 ]

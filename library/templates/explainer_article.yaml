@@ -27,10 +27,18 @@ nodes:
     type: discover
     agent: source_finder@1
     inputs: { brief: brief.brief }
-    # Lower than a report's floor on purpose: an explainer needs the primary paper
-    # and a few good expositions, not a shelf. What it must NOT do is invent the
-    # formula, so the sources that matter are the ones carrying dimensions and scale.
-    params: { min_sources: 12 }
+    # Lower than a report's floor on purpose, and lower than it looks like it should be.
+    # An explainer needs the primary paper and a few real expositions; what it must NOT
+    # do is invent the formula, so the sources that matter are the ones carrying
+    # dimensions and scale.
+    #
+    # A high floor here backfires. The finder is capped against duplicates ("do not keep
+    # two sources about the same thing unless they disagree"), and on a textbook subject
+    # that cap binds long before a floor of a dozen does: there is one primary paper and
+    # a pile of restatements of it. A live run demanded 12, the finder delivered 8 good
+    # ones — every checklist point covered twice over — and the node failed on the
+    # threshold. The floor must be what the article cannot do without, not an ambition.
+    params: { min_sources: 6 }
 
   - id: study
     type: agent
@@ -42,9 +50,9 @@ nodes:
     # min_ok stays close to the shelf's size on purpose. A threshold far below it does
     # not protect the article, it hides the loss: a live run once reported `done` with
     # 18 notes taken from a shelf of 77, and which 18 survived was an accident of
-    # scheduling order. Two unreadable sources out of twelve are tolerable; six are a
-    # different article.
-    params: { workers: 3, min_ok: 10 }
+    # scheduling order. It must also stay strictly under `min_sources` above — set them
+    # equal and one unreadable page fails a node that had everything it needed.
+    params: { workers: 3, min_ok: 5 }
 
   - id: analyse
     type: agent
@@ -123,6 +131,13 @@ nodes:
       - { rule: forbid_regex, pattern: "стоит отметить|важно понимать|давайте разберём", flags: "i" }
       - { rule: forbid_regex, pattern: "погрузимся в|ключевой вывод|в заключение", flags: "i" }
       - { rule: forbid_regex, pattern: "валидиру|имплементиру|хендлит|репортит", flags: "i" }
+      # The ceiling the brief asks for, enforced instead of discussed. A live run's
+      # critic spent a remark on length in all three of its rounds (18-20k, then 13k,
+      # then 13.65k against a brief asking 8-12k) and the article still shipped over —
+      # three rounds of a strong model arguing about a number a gate settles for free.
+      # 14000 rather than 12000: the ceiling counts markdown, tables and figure captions,
+      # which the brief's "8-12 thousand characters" does not.
+      - { rule: max_length, value: 14000 }
 
   - id: figures
     type: agent
