@@ -1006,6 +1006,41 @@ class TestForbidFile:
         measures = measure_rules([self._rule("slop.txt")], "чистый текст", tmp_path)
         assert measures["forbid_file:slop.txt"] == 3
 
+    def test_code_is_not_the_authors_writing(self, tmp_path: Path) -> None:
+        """Measured on a real article: raw matching gave two false positives of three.
+
+        `query.size(-1) ** -0.5` inside inline code read as a bold span, and a
+        subtraction read as a hyphen standing in for a dash. Both would have failed a
+        writer's gate over python it was right to include.
+        """
+        from refract.registry import apply_rules
+
+        self._list(tmp_path, r"\*\*[^*\n]{1,200}\*\*" + "\n" + r"\S - \S" + "\n")
+        article = (
+            "Масштаб ищите в форме тензора: `query.size(-1) ** -0.5` в HuggingFace.\n\n"
+            "```python\nscores = q @ k.transpose(-2, -1) / math.sqrt(d_k)\n"
+            "delta = a - b\n```\n"
+        )
+        assert apply_rules([self._rule("slop.txt")], article, tmp_path) == []
+
+    def test_the_same_pattern_in_prose_still_bites(self, tmp_path: Path) -> None:
+        """The exemption is for code, not for the rule."""
+        from refract.registry import apply_rules
+
+        self._list(tmp_path, r"\*\*[^*\n]{1,200}\*\*" + "\n")
+        assert apply_rules(
+            [self._rule("slop.txt")], "Это **важно** понимать.", tmp_path
+        ) != []
+
+    def test_a_dead_phrase_inside_a_code_comment_is_not_a_finding(
+        self, tmp_path: Path
+    ) -> None:
+        from refract.registry import apply_rules
+
+        self._list(tmp_path, "стоит отметить\n")
+        article = "Чистая проза.\n\n```python\n# стоит отметить: тут хак\nx = 1\n```\n"
+        assert apply_rules([self._rule("slop.txt")], article, tmp_path) == []
+
     def test_the_shipped_russian_list_loads(self) -> None:
         """The library's own list is data, so it is checked like data."""
         from refract.registry import load_forbid_patterns

@@ -317,8 +317,15 @@ def apply_rules(
             flags = 0
             for ch in rule.flags or "":
                 flags |= _REGEX_FLAGS.get(ch, 0)
+            # Matched against the PROSE, not the file. A ban list is editorial policy
+            # about the author's writing, and code is not the author's writing. Measured
+            # on a real article: `query.size(-1) ** -0.5` inside inline code matched the
+            # bold-span pattern, and an `a - b` expression matched hyphen-for-dash. Both
+            # would have failed a writer's gate over python it was right to include, and
+            # the retry would have cost a whole draft.
+            hay = prose_text(text)
             for _, pattern in patterns:
-                hits = len(re.findall(pattern, text, flags))
+                hits = len(re.findall(pattern, hay, flags))
                 if hits > rule.max_hits:
                     allowed = (
                         "" if rule.max_hits == 0 else f" (up to {rule.max_hits} allowed)"
@@ -400,8 +407,9 @@ def measure_rules(
             for ch in rule.flags or "":
                 flags |= _REGEX_FLAGS.get(ch, 0)
             patterns, _ = load_forbid_patterns(Path(rule.path), base_dir)
+            hay = prose_text(text)  # prose, as in apply_rules — code is not writing
             for _, pattern in patterns:
-                forbidden[pattern] = len(re.findall(pattern, text, flags))
+                forbidden[pattern] = len(re.findall(pattern, hay, flags))
             # how many patterns the list actually carried: a run whose gate had nothing
             # to look for must be distinguishable from one that found nothing
             measures[f"forbid_file:{Path(rule.path).name}"] = len(patterns)

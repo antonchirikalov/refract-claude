@@ -155,6 +155,14 @@ class ForbidFileRule(BaseModel):
     A missing or empty file is a FAILURE, never silence. A gate that found no violations
     because it had no patterns reads exactly like a gate that passed, and that is the one
     way a mechanical check can lie.
+
+    Matched against the PROSE (as ``prose_chars`` counts it), not the raw file — code is
+    not the author's writing. ``forbid_regex`` deliberately keeps raw-text semantics: it
+    is the general mechanical rule and a type may use it on structure. Measured on a real
+    article, raw matching gave two false positives out of three hits: an exponent
+    ``query.size(-1) ** -0.5`` inside inline code read as a bold span, and a subtraction
+    read as a hyphen standing in for a dash. Both would have failed a writer's gate over
+    python it was right to include.
     """
 
     model_config = ConfigDict(extra="forbid")
