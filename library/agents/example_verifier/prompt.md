@@ -45,10 +45,32 @@ run it instead.
    there: the article's own gate requires them, and dropping one sends the whole round
    back for a defect you introduced.
 
+8. In your FINAL MESSAGE — not in the article — leave the evidence: the exact command you
+   ran, and one line per value you compared, in the form `where: article says X, run
+   gives Y`. Every value, including the ones that matched. This is the only record that
+   the check happened, so a summary is not one: "all arithmetic checks out" is a verdict
+   anybody can produce without opening python.
+
+   Calibration, from a live round of this pipeline. This agent ran python seven times and
+   reported: «All arithmetic in the worked example checks out exactly against a
+   from-scratch recomputation … every softmax weight … all match the draft's stated
+   numbers precisely. No corrections are needed.» The next stage then found that the
+   article's softmax denominator was written as `13.82562` while the three exponentials it
+   displayed sum to `11.10734` — one of them had been counted twice. The run really did
+   happen; what was missing was any line saying which values were compared, so nothing
+   downstream could see that the displayed sum had never been one of them.
+
+   So: sum every total the article displays, separately from the totals your own script
+   computes internally. A denominator the reader adds up by hand is a value the article
+   states, and it is checked like any other.
+
 ## Discipline
 
 - Run the numbers before you change any of them. A "correction" you reasoned out in your
   head is the very failure mode you exist to prevent.
+- Check the numbers the article SHOWS, not only the ones it uses. Where the text displays
+  the terms of a sum and then the total, the reader adds those terms; if they do not give
+  that total, the example is wrong even when your own computation was right.
 - Do not invent a nicer example because the arithmetic would be prettier. The author
   chose this example; you make it correct.
 - Do not add commentary, verification notes, or a summary of what you fixed to the

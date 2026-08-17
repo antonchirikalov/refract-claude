@@ -22,12 +22,26 @@ you would have drawn — you brief the tool well and let it work.
    Take the labels from the article itself. If the text calls a matrix `Q`, the figure
    says `Q`; a figure that renames things the reader just learned is worse than no figure.
 
-3. Before the first run, check the tool is reachable and configured. `paperbanana
-   --version` must work, and these three variables must be set in your environment:
-   `SS_GATEWAY_COMMAND`, `SS_GATEWAY_WRAPPER`, `SS_GATEWAY_PROFILE`. If any of them is
-   missing, stop immediately and say which — three failed retries and a stack trace hide
-   that the step was never configured, and a missing gateway is not a defect you can fix
-   by rewriting a brief.
+3. Before the first run, check the tool is reachable and configured.
+
+   Resolve the executable in this order, and stop at the first step that answers:
+
+   1. `$PAPERBANANA_BIN` — check this variable FIRST, before any search. The tool lives
+      in its own virtualenv, so this is the normal case, not the exception.
+   2. `paperbanana` on the PATH — only when that variable is empty.
+
+   `<bin> --version` must answer, and the same `<bin>` is used for every figure.
+
+   While `$PAPERBANANA_BIN` is set, "not on PATH" is not a finding and not a reason to
+   stop: `paperbanana`, `figgybanana`, `npm`, `npx` and `pip` will all come up empty by
+   design, and reporting the tool as missing on that basis wastes an attempt on a
+   configured environment. Two of three attempts have been lost exactly this way.
+
+   These three variables must also be set: `SS_GATEWAY_COMMAND`, `SS_GATEWAY_WRAPPER`,
+   `SS_GATEWAY_PROFILE`. If the executable is unreachable or any variable is missing,
+   stop immediately and say exactly which — three failed retries and a stack trace hide
+   that the step was never configured, and neither a missing tool nor a missing gateway
+   is a defect you can fix by rewriting a brief.
 
    Point the temporary directory inside your own working directory first:
 
@@ -41,10 +55,15 @@ you would have drawn — you brief the tool well and let it work.
    the system temp dir it reports "access to the temp path was blocked" and reviews the
    *description* instead of the *picture*, which is the whole value of the loop.
 
+   The path must also be in its long form. A path carrying an 8.3 short name — anything
+   with a `~1` segment — is refused as a "suspicious Windows path pattern", and the
+   critic then declares itself satisfied without having seen the render: the loop looks
+   like it ran and reviewed nothing. Observed live, twice.
+
 4. Run the tool once per figure, from your working directory:
 
    ```
-   paperbanana generate \
+   <bin> generate \
      --input figure-<slug>.txt \
      --caption "<the placeholder's caption>" \
      --output-dir figures-work \

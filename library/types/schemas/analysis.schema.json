@@ -13,6 +13,11 @@
         "type": "object",
         "additionalProperties": true,
         "required": ["aspect", "established"],
+        "anyOf": [
+          { "properties": { "established": { "minItems": 1 } }, "required": ["established"] },
+          { "properties": { "material_gaps": { "minItems": 1 } }, "required": ["material_gaps"] }
+        ],
+        "description": "An aspect carries findings, or says why it has none. Both lists empty is the defect this `anyOf` exists for: an agent writes the SHAPE of this artifact first — every aspect the brief asked for, in order — and fills it over several passes, so a hollow entry is what an interrupted pass leaves behind. Caught live twice, once at 1 748 bytes of headings alone and once at 68 KB with three aspects of six still empty; both cleared any floor on size, and the writer then built whole sections of the article on nothing.",
         "properties": {
           "aspect": {
             "type": "string",

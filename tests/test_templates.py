@@ -244,6 +244,9 @@ _SCENARIOS: dict[str, dict[str, dict[str, str]]] = {
         # its arithmetic corrected — two step ids per round, not one
         "write.body1:*": {"article.md": _ARTICLE},
         "write.body2:*": {"article.md": _ARTICLE},
+        # third link: the fact checker, which also hands back the article. Three step ids
+        # per round, and each of them a chance for the chain to lose the draft.
+        "write.body3:*": {"article.md": _ARTICLE},
         "write.critic:*": {"verdict.json": _APPROVED},
         "style": {"findings.json": _FINDINGS},
         "restyle": {"article.md": _ARTICLE},
@@ -452,9 +455,10 @@ def test_explainer_tail_produces_figures_for_the_declared_placeholders(tmp_path:
         assert (figures / f"{slug}.png").exists(), slug
     manifest = json.loads((figures / "manifest.json").read_text("utf-8"))
     assert manifest["figures"][0]["slug"] == "x-to-qkv"
-    # the loop body is a CHAIN: two steps per round, in order
+    # the loop body is a CHAIN: writer, then both correctors, in order
     assert "write.body1:r1" in ledger.state.steps
     assert "write.body2:r1" in ledger.state.steps
+    assert "write.body3:r1" in ledger.state.steps
 
 
 def test_explainer_calque_gate_bites_on_the_editor(tmp_path: Path):

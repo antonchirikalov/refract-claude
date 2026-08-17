@@ -3,10 +3,9 @@ name: explainer_article
 
 # Explainer mode: a technical article that TEACHES a mechanism, from a topic rather
 # than a documents folder. Sources are found on the network and read, an analyst
-# reconciles them, then a writer builds the article under a critic — with a verifier
-# between them, because in an explainer the fragile part is arithmetic, not citations:
-# a worked example whose numbers do not add up destroys the article's credibility the
-# way a fabricated footnote destroys a report's.
+# reconciles them, then a writer builds the article under a critic — with two
+# correctors between them, because the things that break an explainer are not things a
+# critic can fix. Arithmetic has to be run, and an attribution has to be looked up.
 #
 # After the content holds up, two more stages the report archetype does not have: a
 # style critic that hunts machine-written patterns (its findings are PROPOSALS the
@@ -60,6 +59,11 @@ nodes:
     # the role of each projection) and where they differ (notation, whether the scale
     # is explained as variance control or as a magnitude fix). Without this stage the
     # writer paraphrases whichever source it read last.
+    #
+    # A hollow aspect — an entry with neither findings nor a statement of why it has
+    # none — is refused by `analysis@v1`'s own schema rather than by a rule here: the
+    # artifact is JSON, so its emptiness is a schema question. Caught live twice, both
+    # times comfortably above any floor on size.
     agent: domain_analyst@1
     inputs: { brief: brief.brief, notes: study.note }
     params: { model: claude/opus }
@@ -68,27 +72,80 @@ nodes:
     type: loop
     params: { max_rounds: 3 }
     body:
-      # A CHAIN, not one agent: the writer states the mechanism and works the example,
-      # then the verifier RECOMPUTES that example and corrects the numbers in place.
-      # Arithmetic cannot be checked by reading it — the verifier runs the numbers.
+      # A CHAIN, not one agent, and the order inside it is the order of what cannot be
+      # judged by reading. The writer states the mechanism and works the example. The
+      # verifier RECOMPUTES that example and corrects the numbers in place. The fact
+      # checker opens the notes and makes every attributed claim match the note that
+      # carries it. Only then does the critic see the draft.
+      #
+      # That shape was arrived at expensively. With a writer and a critic alone, the
+      # critic can only REPORT what a corrector could have settled, and a report costs a
+      # whole round: a live run spent all three of its rounds partly on an example whose
+      # displayed sum did not add up (13.82562 where the three shown exponentials give
+      # 11.10734) and on terms used before they were introduced. Anything a corrector can
+      # close should never become a remark.
+      #
       # Only the first element gets the critic's remarks (SPEC §10.3); the last
-      # element's output is the round's draft, so the critic judges verified text.
+      # element's output is the round's draft, so the critic judges corrected text.
       - agent: article_writer@1
         model: claude/opus
         inputs:
           brief: brief.brief
           analysis: analyse.analysis
           notes: study.note
+        # The gate sits on the WRITER, not on the last link of the chain: length and
+        # dead phrases are the writer's to fix, and it is the writer that gets the gate
+        # feedback on a retry. A ceiling enforced on the fact checker would ask the
+        # wrong agent to cut prose it did not write.
+        gate_rules:
+          # Prose, not the file. The previous version of this template had to write its
+          # ceiling as `max_length: 14000` for a brief asking 8–12 thousand — a number
+          # padded to absorb markdown, tables and figure captions — and the critic still
+          # spent a remark on length in every one of its three rounds, guessing 18–20k,
+          # then 13k, then 13.5k for one and the same text. `prose_chars` counts what a
+          # reader reads, and its failure message carries the arithmetic: how many
+          # characters to remove. A round handed "you are over" as one item among sixteen
+          # answered it by adding nine thousand characters of well-sourced material.
+          - { rule: prose_chars, min: 8000, max: 12000 }
+          # A heading with nothing under it. Under a length budget the temptation is to
+          # empty a section rather than tighten it, and an empty section still satisfies
+          # the article type's own structural regexes.
+          - { rule: no_empty_sections }
+          # Editorial policy as DATA. The lists live in library/style/forbid/ and are
+          # edited by a person without touching this file; the same lists are what the
+          # style critic reports on, so there is one description of the policy rather
+          # than two that drift. A pattern a regex settles must never cost a round.
+          - { rule: forbid_file, path: style/forbid/ru-slop.txt }
+          - { rule: forbid_file, path: style/forbid/no-bold.txt }
+
       - agent: example_verifier@1
         model: claude/sonnet
         inputs:
           draft: "@prev"
           brief: brief.brief
+
+      - agent: article_fact_checker@1
+        # Attribution against notes is reading comprehension under pressure to leave
+        # things alone, which is exactly where a weaker model invents corrections —
+        # replacing a wrong attribution with a confident one is worse than the defect.
+        model: claude/opus
+        inputs:
+          draft: "@prev"
+          brief: brief.brief
+          # the notes, not the analysis: checking an attribution against a summary of
+          # the paper is how a wrong corpus name survives a correction stage
+          notes: study.note
+
     critic:
-      # Judges the mechanism, not the prose: whether Q/K/V roles are stated
-      # correctly, whether the scale is explained rather than asserted, whether the
-      # example actually demonstrates what the text claims, whether every figure the
+      # Judges the mechanism, not the prose and no longer the citations: whether Q/K/V
+      # roles are stated correctly, whether the scale is explained rather than asserted,
+      # whether the example demonstrates what the text claims, whether every figure the
       # article promises is one a reader would need.
+      #
+      # It gets the analysis rather than the notes, and that is deliberate now that the
+      # fact checker runs in the same round: two agents doing one job meant the second
+      # was done badly, and dropping the note ports also halves what the most expensive
+      # call of the round reads.
       agent: article_critic@1
       model: claude/opus
       inputs:
@@ -100,11 +157,17 @@ nodes:
 
   - id: style
     type: agent
-    # The ported article critic, in REPORT mode. Produces findings, not a rewrite:
+    # The ported ru-style-critic, in REPORT mode. Produces findings, not a rewrite:
     # layer 1 is mechanical (dashes, quotes, calques, вы/ты) and layer 2 is the
     # machine-pattern hunt (impersonal passive, punctuation overload, three actors in
     # one sentence, "не X, а Y" chains, uniform sentence rhythm). Every finding
     # carries quote → reason → verdict → было/стало, and `decision: pending`.
+    #
+    # One critic, judging after the loop rather than inside it. Two critics in one round
+    # take turns failing — substance ok / style revise, then the reverse — and each round
+    # repairs one axis while disturbing the other; measured elsewhere at eleven rounds
+    # without both ever passing together. Here the axes are separated in TIME: substance
+    # converges first, then style is judged once, by a person's decision.
     agent: article_stylist@1
     inputs: { article: write.article, brief: brief.brief }
     # judging a whole article against narrow criteria is the work a weak model does
@@ -121,23 +184,18 @@ nodes:
       findings: style.findings
     # applying a decided list is mechanical work — the cheap model is the right one
     params: { model: claude/sonnet }
-    # Mechanical checks the editor must not leave behind. Only patterns that CANNOT
-    # occur inside code: this article carries python and formulas, and a flat regex
-    # cannot exclude fenced blocks, so `x = a - b` would read as a hyphen-for-dash and
-    # `print("привет")` as straight quotes in prose. Typography therefore stays with
-    # the stylist's report until there is a markdown-aware layer that knows where the
-    # code is; calques are safe here — no code block contains «стоит отметить».
+    # What the editor must not leave behind. The same two policy files the writer was
+    # held to: an editor that introduces a dead phrase while fixing a dash undoes the
+    # gate that already passed. Typography beyond bold and the dash stays with the
+    # stylist's report — a flat regex cannot tell prose from the python this article
+    # carries, so `x = a - b` would read as a hyphen-for-dash.
     gate_rules:
-      - { rule: forbid_regex, pattern: "стоит отметить|важно понимать|давайте разберём", flags: "i" }
-      - { rule: forbid_regex, pattern: "погрузимся в|ключевой вывод|в заключение", flags: "i" }
-      - { rule: forbid_regex, pattern: "валидиру|имплементиру|хендлит|репортит", flags: "i" }
-      # The ceiling the brief asks for, enforced instead of discussed. A live run's
-      # critic spent a remark on length in all three of its rounds (18-20k, then 13k,
-      # then 13.65k against a brief asking 8-12k) and the article still shipped over —
-      # three rounds of a strong model arguing about a number a gate settles for free.
-      # 14000 rather than 12000: the ceiling counts markdown, tables and figure captions,
-      # which the brief's "8-12 thousand characters" does not.
-      - { rule: max_length, value: 14000 }
+      - { rule: forbid_file, path: style/forbid/ru-slop.txt }
+      - { rule: forbid_file, path: style/forbid/no-bold.txt }
+      # The ceiling again, because an editor applying two hundred edits can drift over
+      # it. Measured on prose, as above; the floor is not repeated — the writer's loop
+      # already cleared it and an editor does not add material.
+      - { rule: prose_chars, max: 12000 }
 
   - id: figures
     type: agent

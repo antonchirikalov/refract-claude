@@ -22,10 +22,13 @@ from refract.models.types import (
     ArtifactTypeDef,
     ArtifactTypesFile,
     CitationClosureRule,
+    ForbidFileRule,
     ForbidRegexRule,
     MaxLengthRule,
     MinEntriesRule,
     MinLengthRule,
+    NoEmptySectionsRule,
+    ProseCharsRule,
     RegexRule,
     Rule,
     TypeFormat,
@@ -148,13 +151,145 @@ def model_slug(model: str) -> str:
 
 # --- rules -----------------------------------------------------------------
 
+# Markdown constructs that are not the author's prose. Order matters: fences go
+# first, so a table or a heading INSIDE a code block is never mistaken for markup.
+_FENCE_RE = re.compile(r"^[ \t]*(?:```|~~~).*?(?:\n|$)", re.MULTILINE)
+_FRONT_MATTER_RE = re.compile(r"\A---\n.*?\n---[ \t]*(?:\n|\Z)", re.DOTALL)
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+_TABLE_ROW_RE = re.compile(r"^[ \t]*\|.*$", re.MULTILINE)
+_HEADING_RE = re.compile(r"^[ \t]*(#{1,6})[ \t]+(.*)$")
 
-def apply_rules(rules: Sequence[Rule], text: str) -> list[str]:
+
+def _strip_fences(text: str) -> str:
+    """Remove fenced code blocks, keeping everything outside them.
+
+    An unclosed fence is common in a draft, and both a greedy regex and a naive scan
+    swallow the rest of the article on one — reporting a whole draft as zero characters
+    of prose, which is a measurement failure disguised as a text that needs lengthening.
+    A block is therefore removed only once its closing fence has been seen; a fence that
+    never closes was not a block, and its content counts.
+    """
+    out: list[str] = []
+    held: list[str] = []
+    inside = False
+    for line in text.splitlines(keepends=True):
+        if _FENCE_RE.match(line):
+            if inside:
+                held.clear()  # the block closed: it really was code
+            inside = not inside
+            continue
+        (held if inside else out).append(line)
+    out.extend(held)
+    return "".join(out)
+
+
+def prose_text(text: str) -> str:
+    """The article with everything that is not the author's prose removed (§5).
+
+    What the brief means by length is the text a reader reads. Code, tables, image
+    placeholders and URLs are none of that, and counting them made one live pipeline
+    write its ceiling as 14000 for an assignment asking 8-12 thousand.
+    """
+    text = _FRONT_MATTER_RE.sub("", text)
+    text = _strip_fences(text)
+    text = _HTML_COMMENT_RE.sub("", text)
+    text = _TABLE_ROW_RE.sub("", text)
+    text = _IMAGE_RE.sub("", text)
+    # link text is prose, the URL is not
+    text = _LINK_RE.sub(r"\1", text)
+    text = _INLINE_CODE_RE.sub("", text)
+    return text
+
+
+def prose_chars(text: str) -> int:
+    """Readable characters of prose, whitespace collapsed (§5).
+
+    Collapsed so the number does not move when a blank line is added or an indent
+    changes: a length budget the writer is asked to hit has to mean the same thing
+    twice in a row.
+    """
+    return len(" ".join(prose_text(text).split()))
+
+
+def load_forbid_patterns(
+    path: Path, base_dir: Path | None = None
+) -> tuple[list[tuple[int, str]], list[str]]:
+    """Patterns from a forbid file as ``(line_no, pattern)``, plus problems (§5).
+
+    A missing file, an unreadable one and one holding no patterns are all problems and
+    never silence: a gate that found nothing because it had no list to look for reads
+    exactly like a gate that passed.
+    """
+    resolved = path if path.is_absolute() else (base_dir or Path()) / path
+    try:
+        raw = resolved.read_text("utf-8")
+    except FileNotFoundError:
+        return [], [f"forbid_file {path.as_posix()!r} not found at {resolved}"]
+    except (OSError, UnicodeDecodeError) as exc:
+        return [], [f"forbid_file {path.as_posix()!r} unreadable: {exc}"]
+    patterns: list[tuple[int, str]] = []
+    problems: list[str] = []
+    for n, line in enumerate(raw.splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            re.compile(line)
+        except re.error as exc:
+            problems.append(
+                f"forbid_file {path.as_posix()!r} line {n}: invalid regex {line!r}: {exc}"
+            )
+            continue
+        patterns.append((n, line))
+    if not patterns and not problems:
+        problems.append(
+            f"forbid_file {path.as_posix()!r} holds no patterns — "
+            "an empty list cannot be passed, only ignored"
+        )
+    return patterns, problems
+
+
+def find_empty_sections(text: str, min_chars: int) -> list[str]:
+    """Headings with nothing under them, in document order (§5).
+
+    A heading followed by a DEEPER heading is a container and is fine — that is how a
+    document is structured. A heading followed by nothing but a sibling or a shallower
+    one is a promise the artifact does not keep.
+    """
+    lines = _strip_fences(text).splitlines()
+    headings: list[tuple[int, int, str]] = []  # (index, level, title)
+    for i, line in enumerate(lines):
+        m = _HEADING_RE.match(line)
+        if m:
+            headings.append((i, len(m.group(1)), m.group(2).strip()))
+    empty: list[str] = []
+    for pos, (index, level, title) in enumerate(headings):
+        nxt = headings[pos + 1] if pos + 1 < len(headings) else None
+        end = nxt[0] if nxt else len(lines)
+        body = " ".join(" ".join(lines[index + 1 : end]).split())
+        if len(body) >= min_chars:
+            continue
+        # a container: the work lives under its subheadings
+        if nxt is not None and nxt[1] > level:
+            continue
+        empty.append(title or f"(untitled heading on line {index + 1})")
+    return empty
+
+
+def apply_rules(
+    rules: Sequence[Rule], text: str, base_dir: Path | None = None
+) -> list[str]:
     """Rule-failure messages for this text; empty means every rule passes (§5).
 
     A free function, not only a method of the type: a node may tighten the gate of
     its own output (``gate_rules``, SPEC §8), and those rules are checked with the
     very same code as the type's own.
+
+    ``base_dir`` resolves the pattern files of ``forbid_file`` — the library root, so a
+    pipeline that travels keeps pointing at the lists that travel with it.
     """
     failures: list[str] = []
     for rule in rules:
@@ -176,12 +311,52 @@ def apply_rules(rules: Sequence[Rule], text: str) -> list[str]:
                 failures.append(
                     f"forbidden pattern {rule.pattern!r} found {hits} time(s){allowed}"
                 )
+        elif isinstance(rule, ForbidFileRule):
+            patterns, problems = load_forbid_patterns(Path(rule.path), base_dir)
+            failures.extend(problems)
+            flags = 0
+            for ch in rule.flags or "":
+                flags |= _REGEX_FLAGS.get(ch, 0)
+            for _, pattern in patterns:
+                hits = len(re.findall(pattern, text, flags))
+                if hits > rule.max_hits:
+                    allowed = (
+                        "" if rule.max_hits == 0 else f" (up to {rule.max_hits} allowed)"
+                    )
+                    failures.append(
+                        f"forbidden pattern {pattern!r} "
+                        f"({Path(rule.path).name}) found {hits} time(s){allowed}"
+                    )
         elif isinstance(rule, MinLengthRule):
             if len(text) < rule.value:
                 failures.append(f"min_length {rule.value} not met (got {len(text)})")
         elif isinstance(rule, MaxLengthRule):
             if len(text) > rule.value:
                 failures.append(f"max_length {rule.value} exceeded (got {len(text)})")
+        elif isinstance(rule, ProseCharsRule):
+            # The arithmetic, not the verdict. A round handed "max_prose exceeded" as one
+            # item among sixteen answered it with nine thousand characters of well-sourced
+            # material: every edit added a sensible sentence and the draft grew. The engine
+            # knows the ceiling and the measurement, so it says how much to remove.
+            actual = prose_chars(text)
+            if rule.max is not None and actual > rule.max:
+                failures.append(
+                    f"prose_chars max {rule.max} exceeded (got {actual}) — "
+                    f"remove at least {actual - rule.max} characters of prose; "
+                    "this revision must end shorter than it started"
+                )
+            if rule.min is not None and actual < rule.min:
+                failures.append(
+                    f"prose_chars min {rule.min} not met (got {actual}) — "
+                    f"add at least {rule.min - actual} characters of substance"
+                )
+        elif isinstance(rule, NoEmptySectionsRule):
+            empty = find_empty_sections(text, rule.min_chars)
+            if empty:
+                failures.append(
+                    f"{len(empty)} heading(s) with nothing under them: "
+                    + "; ".join(empty)
+                )
         elif isinstance(rule, CitationClosureRule):
             failures.extend(check_citation_closure(text, rule))
         elif isinstance(rule, MinEntriesRule):
@@ -191,7 +366,9 @@ def apply_rules(rules: Sequence[Rule], text: str) -> list[str]:
     return failures
 
 
-def measure_rules(rules: Sequence[Rule], text: str) -> dict[str, object]:
+def measure_rules(
+    rules: Sequence[Rule], text: str, base_dir: Path | None = None
+) -> dict[str, object]:
     """What the rules MEASURED, pass or fail (SPEC §10.2).
 
     The gate's verdict is binary, and that hid a question worth asking: a report that
@@ -218,10 +395,28 @@ def measure_rules(rules: Sequence[Rule], text: str) -> dict[str, object]:
             # a count, not a boolean: "passed with two of the three allowed" is the
             # kind of near-miss `refract explain` exists to surface
             forbidden[rule.pattern] = len(re.findall(rule.pattern, text, flags))
+        elif isinstance(rule, ForbidFileRule):
+            flags = 0
+            for ch in rule.flags or "":
+                flags |= _REGEX_FLAGS.get(ch, 0)
+            patterns, _ = load_forbid_patterns(Path(rule.path), base_dir)
+            for _, pattern in patterns:
+                forbidden[pattern] = len(re.findall(pattern, text, flags))
+            # how many patterns the list actually carried: a run whose gate had nothing
+            # to look for must be distinguishable from one that found nothing
+            measures[f"forbid_file:{Path(rule.path).name}"] = len(patterns)
         elif isinstance(rule, MinLengthRule):
             measures["min_length"] = rule.value
         elif isinstance(rule, MaxLengthRule):
             measures["max_length"] = rule.value
+        elif isinstance(rule, ProseCharsRule):
+            measures["prose_chars"] = prose_chars(text)
+            if rule.min is not None:
+                measures["prose_min"] = rule.min
+            if rule.max is not None:
+                measures["prose_max"] = rule.max
+        elif isinstance(rule, NoEmptySectionsRule):
+            measures["empty_sections"] = len(find_empty_sections(text, rule.min_chars))
         elif isinstance(rule, CitationClosureRule):
             facts = measure_citations(text, rule)
             if facts is not None:
@@ -364,9 +559,9 @@ class ResolvedType:
         """Whether content of this size may be inlined into a prompt (SPEC §5/§11)."""
         return self.inline and size_bytes < INLINE_MAX_BYTES
 
-    def check_rules(self, text: str) -> list[str]:
+    def check_rules(self, text: str, base_dir: Path | None = None) -> list[str]:
         """Return a list of rule-failure messages; empty means all rules pass (§5)."""
-        return apply_rules(self.rules, text)
+        return apply_rules(self.rules, text, base_dir)
 
     def validate_json(self, data: object) -> list[str]:
         """Return JSON-schema error messages; empty means valid (SPEC §10.2 gate)."""
@@ -407,8 +602,14 @@ def _read_json_schema(path: Path) -> dict[str, object]:
 class ArtifactRegistry:
     """The resolved set of artifact types (user + injected built-ins)."""
 
-    def __init__(self, types: dict[str, ResolvedType]) -> None:
+    def __init__(
+        self, types: dict[str, ResolvedType], library_path: Path | None = None
+    ) -> None:
         self._types = types
+        # Where a ``forbid_file`` pattern list is resolved from. Carried on the registry
+        # because that is the object every gate already has, and the alternative was
+        # threading a second path through the plan, the port and the step.
+        self.library_path = library_path
 
     @staticmethod
     def _load_builtins() -> dict[str, ResolvedType]:
@@ -445,7 +646,7 @@ class ArtifactRegistry:
 
         types_file = library_path / "types" / "artifact_types.yaml"
         if not types_file.exists():
-            return cls(types)
+            return cls(types, library_path)
 
         try:
             raw = yaml.safe_load(types_file.read_text("utf-8")) or {}
@@ -476,7 +677,7 @@ class ArtifactRegistry:
                 schema = _read_json_schema(schema_path)
             types[name] = ResolvedType(name, defn, is_builtin=False, schema=schema)
 
-        return cls(types)
+        return cls(types, library_path)
 
     # --- lookups -----------------------------------------------------------
 

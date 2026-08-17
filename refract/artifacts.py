@@ -153,6 +153,10 @@ class GatePort:
     optional: bool = False
     # node-level tightening on top of the type's own rules (SPEC §8 ``gate_rules``)
     extra_rules: tuple[Rule, ...] = ()
+    # library root: where ``forbid_file`` resolves its pattern list from. A rule whose
+    # data lives in a file needs to know where the file is, and the gate is the only
+    # place that reads it.
+    base_dir: Path | None = None
 
 
 class PortGateResult(BaseModel):
@@ -199,9 +203,11 @@ def check_port(output_dir: Path | str, spec: GatePort) -> PortGateResult:
                     port=spec.port, ok=False, problems=[f"invalid json: {e}"]
                 )
             problems.extend(spec.rtype.validate_json(data))
-        problems.extend(spec.rtype.check_rules(text))
-        problems.extend(apply_rules(spec.extra_rules, text))
-        measures = measure_rules(list(spec.rtype.rules) + list(spec.extra_rules), text)
+        problems.extend(spec.rtype.check_rules(text, spec.base_dir))
+        problems.extend(apply_rules(spec.extra_rules, text, spec.base_dir))
+        measures = measure_rules(
+            list(spec.rtype.rules) + list(spec.extra_rules), text, spec.base_dir
+        )
     else:
         # dir/any: existence alone is too weak — an agent that produced nothing
         # would still pass (SPEC §10.2 > CHANGED). Require real content.

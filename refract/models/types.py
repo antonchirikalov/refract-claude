@@ -108,6 +108,91 @@ class MaxLengthRule(BaseModel):
     value: int = Field(ge=1)
 
 
+class ProseCharsRule(BaseModel):
+    """Content rule: bounds on the READABLE prose, not on the file (SPEC §5).
+
+    ``min_length``/``max_length`` count the file, and for an article that carries python,
+    formulas, tables and figure captions that is not the size the assignment talks about.
+    A live run made the discrepancy visible twice: the ceiling in the pipeline had to be
+    written as 14000 for a brief asking 8-12 thousand characters — a number picked to
+    absorb the markdown rather than to state the article's length — and the critic still
+    spent a remark on length in all three of its rounds, guessing 18-20k, then 13k, then
+    13.5k for one and the same text. Asked by eye, a model cannot count; asked of the file,
+    the count is of the wrong thing.
+
+    Fenced code, inline code, table rows, image placeholders, front matter and link URLs
+    are therefore removed before counting, and whitespace is collapsed, so the number does
+    not move when a blank line is added.
+
+    Both bounds are optional and at least one is required: an assignment that says nothing
+    about length gets a measurement and no verdict, which is exactly what a ceiling nobody
+    asked for would destroy.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    rule: Literal["prose_chars"]
+    min: int | None = Field(default=None, ge=0)
+    max: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _bounds(self) -> "ProseCharsRule":
+        if self.min is None and self.max is None:
+            raise ValueError("prose_chars needs at least one of min/max")
+        if self.min is not None and self.max is not None and self.min > self.max:
+            raise ValueError(f"prose_chars min {self.min} exceeds max {self.max}")
+        return self
+
+
+class ForbidFileRule(BaseModel):
+    """Content rule: none of the patterns listed in a FILE may appear (SPEC §5).
+
+    ``forbid_regex`` with the patterns written into the pipeline makes editorial policy
+    part of the pipeline: adding a dead phrase means editing the conveyor, and the same
+    list ends up duplicated wherever it is needed — after the first edit it is two lists.
+    The list of dead phrases is data a person maintains, one regex per line, and it is the
+    same data the writer is held to and the style critic reports on.
+
+    A missing or empty file is a FAILURE, never silence. A gate that found no violations
+    because it had no patterns reads exactly like a gate that passed, and that is the one
+    way a mechanical check can lie.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    rule: Literal["forbid_file"]
+    # relative to the library root, so a pipeline vendored elsewhere keeps working
+    path: str
+    flags: str | None = "i"
+    max_hits: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_flags(self) -> "ForbidFileRule":
+        for ch in self.flags or "":
+            if ch not in _ALLOWED_REGEX_FLAGS:
+                raise ValueError(f"unknown regex flag: {ch!r}")
+        return self
+
+
+class NoEmptySectionsRule(BaseModel):
+    """Content rule: every heading must have work under it (SPEC §5).
+
+    A floor on length answers "did the agent write anything" and misses what agents
+    actually do with a structured artifact: they write the SHAPE first — every heading the
+    contract asks for, in order — and fill it section by section over several passes. Both
+    live failures cleared a floor comfortably: one analysis was 1 748 bytes of headings
+    alone, another was 68 KB with three of six aspects still hollow. The stage downstream
+    then builds a whole section of the article on nothing.
+
+    A heading followed by a deeper heading is a container and is fine; a heading followed
+    by nothing but a sibling or a shallower heading is empty.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    rule: Literal["no_empty_sections"]
+    # one visible character is the honest floor: this rule answers "is anything there",
+    # and "is there enough" is min_length's question, asked separately
+    min_chars: int = Field(default=1, ge=1)
+
+
 class MinEntriesRule(BaseModel):
     """Content rule for ``kind: dir``: at least N entries must be present (SPEC §5).
 
@@ -157,8 +242,11 @@ Rule = Annotated[
     Union[
         RegexRule,
         ForbidRegexRule,
+        ForbidFileRule,
         MinLengthRule,
         MaxLengthRule,
+        ProseCharsRule,
+        NoEmptySectionsRule,
         MinEntriesRule,
         CitationClosureRule,
     ],

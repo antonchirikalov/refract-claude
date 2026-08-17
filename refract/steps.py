@@ -144,6 +144,8 @@ def _gate_ports(
                     rtype=rtype,
                     optional=p.optional,
                     extra_rules=tuple(gate_rules) if i == 0 else (),
+                    # where a ``forbid_file`` pattern list is read from
+                    base_dir=registry.library_path,
                 )
             )
     return ports

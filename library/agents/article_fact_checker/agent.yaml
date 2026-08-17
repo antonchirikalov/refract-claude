@@ -1,0 +1,23 @@
+name: article_fact_checker
+version: 1
+description: >
+  Checks every claim the article attributes to a source against the note on that source,
+  and returns the article with the attributions made true. The second corrector of the
+  writing loop, beside the one that recomputes the example: an attribution cannot be
+  checked by reading the article, only by opening the note — and a critic that finds a
+  wrong attribution can merely report it, which costs a whole revision round. Anything a
+  corrector can settle should never become a remark.
+consumes:
+  - { port: draft, type: article@v1 }
+  # the assignment says who the reader is, which decides whether a claim needs a source
+  # at all: common knowledge for the audience does not, a number does
+  - { port: brief, type: brief@v1 }
+  # the notes themselves, not the analysis. Checking an attribution against a summary of
+  # the paper is how a wrong corpus name survives a correction stage: the summary says
+  # what the sources establish together, and the question here is what THIS one said.
+  - { port: notes, type: collection<study_note@v1> }
+produces:
+  - { port: article, type: article@v1 }
+needs: [read, edit]
+defaults:
+  timeout_s: 1800

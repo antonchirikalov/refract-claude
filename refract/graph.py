@@ -20,7 +20,7 @@ from pydantic import ValidationError as PydanticValidationError
 from refract.builtins import BUILTINS, BuiltinDef
 from refract.models.agent import AgentSpec, Port
 from refract.models.errors import Code, ValidationError
-from refract.models.types import MinEntriesRule
+from refract.models.types import ForbidFileRule, MinEntriesRule
 from refract.models.pipeline import (
     AgentNode,
     BodyBlock,
@@ -35,6 +35,7 @@ from refract.models.pipeline import (
 from refract.registry import (
     ArtifactRegistry,
     check_edge,
+    load_forbid_patterns,
     make_collection,
     parse_type_ref,
 )
@@ -509,6 +510,23 @@ class _Validator:
                 f"gate_rules apply to the primary port {primary[0].port!r}, which is "
                 f"{rtype.kind.value}-kind — only min_entries applies to a directory",
             )
+        self._check_forbid_files(node_id, gate_rules)
+
+    def _check_forbid_files(self, node_id: str, rules: Sequence[object]) -> None:
+        """A ``forbid_file`` list has to exist and hold patterns (§5).
+
+        Checked here as well as at the gate, and that duplication is the point: a run
+        whose pattern list went missing would otherwise discover it after paying for the
+        step, and what it would see is a gate reporting no violations — which is what a
+        clean draft looks like.
+        """
+        base = self.ctx.registry.library_path
+        for rule in rules:
+            if not isinstance(rule, ForbidFileRule):
+                continue
+            _, problems = load_forbid_patterns(Path(rule.path), base)
+            for problem in problems:
+                self.err(Code.E_FORBID_FILE, node_id, problem)
 
     def _check_agent_contract(self, node_id: str, spec: AgentSpec) -> None:
         # produces must not be a collection (I6, §16.7)

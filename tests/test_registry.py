@@ -840,3 +840,244 @@ class TestMaxLength:
         assert apply_rules(rules, "x" * 15) == []
         assert len(apply_rules(rules, "x" * 5)) == 1
         assert len(apply_rules(rules, "x" * 25)) == 1
+
+
+# --- prose_chars: what the brief means by length is the text a reader reads ---
+
+
+class TestProseChars:
+    """The gate counts prose; a critic asked by eye named three different numbers."""
+
+    def _rule(self, **kw: object):
+        from refract.models.types import ProseCharsRule
+
+        return ProseCharsRule(rule="prose_chars", **kw)
+
+    def test_one_bound_is_required(self) -> None:
+        from pydantic import ValidationError
+
+        from refract.models.types import ProseCharsRule
+
+        with pytest.raises(ValidationError):
+            ProseCharsRule(rule="prose_chars")
+
+    def test_min_above_max_is_rejected(self) -> None:
+        from pydantic import ValidationError
+
+        from refract.models.types import ProseCharsRule
+
+        with pytest.raises(ValidationError):
+            ProseCharsRule(rule="prose_chars", min=900, max=100)
+
+    def test_code_blocks_do_not_count(self) -> None:
+        from refract.registry import prose_chars
+
+        prose = "Внимание — взвешенная сумма."
+        with_code = prose + "\n\n```python\n" + "x = 1\n" * 200 + "```\n"
+        assert prose_chars(with_code) == prose_chars(prose)
+
+    def test_tables_images_and_urls_do_not_count(self) -> None:
+        from refract.registry import prose_chars
+
+        prose = "Строка прозы."
+        noise = (
+            prose
+            + "\n\n| столбец | столбец |\n|---|---|\n| a | b |\n"
+            + "\n![подпись к рисунку](figures/very-long-name.png)\n"
+            + "\nСсылка на [текст](https://example.com/a/very/long/url) внутри.\n"
+        )
+        # the link TEXT is prose, its URL is not
+        assert prose_chars(noise) == prose_chars(prose + "\nСсылка на текст внутри.")
+
+    def test_whitespace_does_not_move_the_number(self) -> None:
+        """A budget the writer is asked to hit must mean the same thing twice."""
+        from refract.registry import prose_chars
+
+        assert prose_chars("а  б\n\n\nв") == prose_chars("а б в")
+
+    def test_unclosed_fence_does_not_swallow_the_article(self) -> None:
+        """A draft with one stray fence still has a measurable length."""
+        from refract.registry import prose_chars
+
+        assert prose_chars("```\nx = 1\nостальная статья") > 0
+
+    def test_over_the_ceiling_states_the_arithmetic(self) -> None:
+        """The engine knows the ceiling and the count, so it says how much to remove."""
+        from refract.registry import apply_rules
+
+        problems = apply_rules([self._rule(max=100)], "я" * 137)
+        assert len(problems) == 1
+        assert "prose_chars max 100 exceeded (got 137)" in problems[0]
+        assert "remove at least 37 characters" in problems[0]
+
+    def test_under_the_floor_states_the_arithmetic(self) -> None:
+        from refract.registry import apply_rules
+
+        problems = apply_rules([self._rule(min=100)], "я" * 60)
+        assert "add at least 40 characters" in problems[0]
+
+    def test_measured_when_passing(self) -> None:
+        from refract.registry import measure_rules
+
+        measures = measure_rules([self._rule(min=10, max=100)], "я" * 50)
+        assert measures["prose_chars"] == 50
+        assert measures["prose_min"] == 10
+        assert measures["prose_max"] == 100
+
+    def test_a_file_that_passes_max_length_can_still_fail_prose(self) -> None:
+        """The reason this rule exists: the file and the prose are different sizes."""
+        from refract.models.types import MaxLengthRule
+        from refract.registry import apply_rules
+
+        article = "я" * 120 + "\n\n```\n" + "код\n" * 100 + "```\n"
+        assert apply_rules([MaxLengthRule(rule="max_length", value=1000)], article) == []
+        assert apply_rules([self._rule(max=100)], article) != []
+
+
+# --- forbid_file: the ban list is data a person edits, not code --------------
+
+
+class TestForbidFile:
+    """A gate with no patterns must not look like a gate that passed (SPEC §5)."""
+
+    def _rule(self, path: str, **kw: object):
+        from refract.models.types import ForbidFileRule
+
+        return ForbidFileRule(rule="forbid_file", path=path, **kw)
+
+    def _list(self, tmp_path: Path, body: str) -> Path:
+        f = tmp_path / "slop.txt"
+        f.write_text(body, encoding="utf-8")
+        return f
+
+    def test_pattern_from_the_file_is_enforced(self, tmp_path: Path) -> None:
+        from refract.registry import apply_rules
+
+        self._list(tmp_path, "# комментарий\nстоит отметить\n\nважно понимать\n")
+        problems = apply_rules(
+            [self._rule("slop.txt")], "Стоит отметить, что всё работает.", tmp_path
+        )
+        assert len(problems) == 1
+        assert "стоит отметить" in problems[0]
+        assert "slop.txt" in problems[0]
+
+    def test_clean_text_passes(self, tmp_path: Path) -> None:
+        from refract.registry import apply_rules
+
+        self._list(tmp_path, "стоит отметить\n")
+        assert apply_rules([self._rule("slop.txt")], "Всё работает.", tmp_path) == []
+
+    def test_missing_file_is_a_failure_not_silence(self, tmp_path: Path) -> None:
+        from refract.registry import apply_rules
+
+        problems = apply_rules([self._rule("absent.txt")], "любой текст", tmp_path)
+        assert len(problems) == 1
+        assert "not found" in problems[0]
+
+    def test_empty_file_is_a_failure(self, tmp_path: Path) -> None:
+        from refract.registry import apply_rules
+
+        self._list(tmp_path, "# только комментарии\n\n")
+        problems = apply_rules([self._rule("slop.txt")], "любой текст", tmp_path)
+        assert "holds no patterns" in problems[0]
+
+    def test_broken_regex_names_its_line(self, tmp_path: Path) -> None:
+        from refract.registry import apply_rules
+
+        self._list(tmp_path, "хорошая\n[незакрытая\n")
+        problems = apply_rules([self._rule("slop.txt")], "любой текст", tmp_path)
+        assert any("line 2" in p for p in problems)
+
+    def test_max_hits_allows_a_deliberate_zone(self, tmp_path: Path) -> None:
+        from refract.registry import apply_rules
+
+        self._list(tmp_path, "сбой\n")
+        text = "сбой первый и сбой второй"
+        assert apply_rules([self._rule("slop.txt", max_hits=2)], text, tmp_path) == []
+        assert apply_rules([self._rule("slop.txt", max_hits=1)], text, tmp_path) != []
+
+    def test_measures_record_how_many_patterns_the_list_carried(
+        self, tmp_path: Path
+    ) -> None:
+        """A run whose gate had nothing to look for has to be distinguishable."""
+        from refract.registry import measure_rules
+
+        self._list(tmp_path, "один\nдва\nтри\n")
+        measures = measure_rules([self._rule("slop.txt")], "чистый текст", tmp_path)
+        assert measures["forbid_file:slop.txt"] == 3
+
+    def test_the_shipped_russian_list_loads(self) -> None:
+        """The library's own list is data, so it is checked like data."""
+        from refract.registry import load_forbid_patterns
+
+        library = Path(__file__).resolve().parent.parent / "library"
+        patterns, problems = load_forbid_patterns(
+            Path("style/forbid/ru-slop.txt"), library
+        )
+        assert problems == []
+        assert len(patterns) > 20
+
+
+# --- no_empty_sections: a heading is a promise -------------------------------
+
+
+class TestNoEmptySections:
+    """A floor on length passes an artifact that is only its own table of contents."""
+
+    def _rule(self, **kw: object):
+        from refract.models.types import NoEmptySectionsRule
+
+        return NoEmptySectionsRule(rule="no_empty_sections", **kw)
+
+    def test_filled_sections_pass(self) -> None:
+        from refract.registry import apply_rules
+
+        text = "# Разбор\n\nтекст под заголовком\n\n## Аспект\n\nи тут текст\n"
+        assert apply_rules([self._rule()], text) == []
+
+    def test_a_hollow_heading_is_named(self) -> None:
+        from refract.registry import apply_rules
+
+        text = "# Разбор\n\nвведение\n\n## Масштабирование\n\n## Маски\n\nтекст\n"
+        problems = apply_rules([self._rule()], text)
+        assert len(problems) == 1
+        assert "Масштабирование" in problems[0]
+
+    def test_a_container_heading_is_not_a_defect(self) -> None:
+        """`# Разбор` followed straight by `## Аспект` is structure, not emptiness."""
+        from refract.registry import apply_rules
+
+        text = "# Разбор\n\n## Аспект\n\nработа под аспектом\n"
+        assert apply_rules([self._rule()], text) == []
+
+    def test_the_last_heading_counts_too(self) -> None:
+        from refract.registry import apply_rules
+
+        text = "# Разбор\n\nвведение\n\n## Выводы\n"
+        problems = apply_rules([self._rule()], text)
+        assert "Выводы" in problems[0]
+
+    def test_a_hash_inside_code_is_not_a_heading(self) -> None:
+        from refract.registry import apply_rules
+
+        text = "# Разбор\n\nвведение\n\n```python\n# это комментарий\nx = 1\n```\n"
+        assert apply_rules([self._rule()], text) == []
+
+    def test_the_shape_of_a_live_failure(self) -> None:
+        """68 KB of analysis with three of six aspects hollow cleared any floor."""
+        from refract.models.types import MinLengthRule
+        from refract.registry import apply_rules
+
+        filled = "\n\n".join(f"## Аспект {i}\n\n" + "текст " * 400 for i in range(3))
+        hollow = "\n\n".join(f"## Аспект {i}" for i in range(3, 6))
+        text = "# Разбор\n\n" + filled + "\n\n" + hollow + "\n"
+        assert apply_rules([MinLengthRule(rule="min_length", value=200)], text) == []
+        problems = apply_rules([self._rule()], text)
+        assert len(problems) == 1
+        assert problems[0].startswith("3 heading(s)")
+
+    def test_measured_when_passing(self) -> None:
+        from refract.registry import measure_rules
+
+        text = "# А\n\nтекст\n"
+        assert measure_rules([self._rule()], text)["empty_sections"] == 0

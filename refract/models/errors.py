@@ -37,6 +37,10 @@ class Code(str, Enum):
     E_HITL_SHAPE = "E_HITL_SHAPE"
     E_DISCOVER_SHAPE = "E_DISCOVER_SHAPE"  # §20.1
     E_GATE_RULES_SHAPE = "E_GATE_RULES_SHAPE"  # §8: node gate_rules on a non-file port
+    # §5: forbid_file points at a list that is missing, unreadable, empty or broken.
+    # Caught at validation because the alternative is a gate that finds nothing for
+    # want of patterns — indistinguishable, in any report, from a gate that passed.
+    E_FORBID_FILE = "E_FORBID_FILE"
     E_MCP_UNDECLARED = (
         "E_MCP_UNDECLARED"  # §8.3: needs mcp:<server> with no such server
     )

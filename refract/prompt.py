@@ -22,12 +22,18 @@ from refract.artifacts import artifact_filename
 from refract.models.agent import AgentSpec, Port
 from refract.models.types import (
     CitationClosureRule,
+    ForbidFileRule,
+    ForbidRegexRule,
+    MaxLengthRule,
+    MinEntriesRule,
     MinLengthRule,
+    NoEmptySectionsRule,
+    ProseCharsRule,
     RegexRule,
     Rule,
     TypeKind,
 )
-from refract.registry import ArtifactRegistry, parse_type_ref
+from refract.registry import ArtifactRegistry, load_forbid_patterns, parse_type_ref
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
 _COLLECTION_INLINE_MAX_ITEMS = 50  # SPEC §11
@@ -242,6 +248,9 @@ def _schema_summary(
     rtype = registry.get(type_name)
     if rtype is None:
         return ""
+    # where a `forbid_file` list is read from, so the agent is shown the patterns
+    # themselves rather than the name of a file it cannot open (I1)
+    base_dir = registry.library_path
     lines: list[str] = []
     fmt = rtype.format.value if rtype.format is not None else rtype.kind.value
     lines.append(f"Format: {fmt}.")
@@ -254,11 +263,67 @@ def _schema_summary(
             + json.dumps(rtype.schema, indent=2, ensure_ascii=False)
             + "\n```"
         )
+    # Every rule the gate will run, stated here. A rule the agent is not told about is a
+    # rule it can only discover by failing: the gate retries with feedback, but that
+    # retry is a whole draft paid for twice. Silence here also produced the opposite
+    # defect — a live run's critic spent a remark on length in each of its three rounds
+    # while the ceiling sat in the pipeline, unseen by the writer and unmeasured by
+    # anyone. Generated from the contract, never hand-written into a prompt (I5).
     for rule in [*rtype.rules, *extra_rules]:
         if isinstance(rule, RegexRule):
             lines.append(f"Must match regex `{rule.pattern}`.")
+        elif isinstance(rule, ForbidRegexRule):
+            allowance = (
+                "must not appear at all"
+                if rule.max_hits == 0
+                else f"may appear at most {rule.max_hits} time(s)"
+            )
+            lines.append(f"The pattern `{rule.pattern}` {allowance}.")
+        elif isinstance(rule, ForbidFileRule):
+            patterns, problems = load_forbid_patterns(Path(rule.path), base_dir)
+            if problems:
+                # Announced rather than skipped: an agent told nothing about a list that
+                # failed to load would write against a policy nobody stated, and the gate
+                # would then fail it for a reason it never saw.
+                lines.append(
+                    f"NOTE: the ban list `{rule.path}` could not be read "
+                    f"({problems[0]}); the gate will fail on it."
+                )
+            else:
+                shown = ", ".join(f"`{p}`" for _, p in patterns)
+                allowance = (
+                    "None of these patterns may appear"
+                    if rule.max_hits == 0
+                    else f"Each of these may appear at most {rule.max_hits} time(s)"
+                )
+                lines.append(
+                    f"{allowance} (regexes, case-insensitive, from `{rule.path}`): "
+                    f"{shown}."
+                )
         elif isinstance(rule, MinLengthRule):
             lines.append(f"At least {rule.value} characters.")
+        elif isinstance(rule, MaxLengthRule):
+            lines.append(f"At most {rule.value} characters.")
+        elif isinstance(rule, ProseCharsRule):
+            bounds = []
+            if rule.min is not None:
+                bounds.append(f"at least {rule.min}")
+            if rule.max is not None:
+                bounds.append(f"at most {rule.max}")
+            lines.append(
+                f"Readable prose: {' and '.join(bounds)} characters. Counted with code "
+                "blocks, inline code, tables, image placeholders and URLs removed and "
+                "whitespace collapsed — so the count is smaller than the file, and "
+                "moving text into a code block does not buy room."
+            )
+        elif isinstance(rule, NoEmptySectionsRule):
+            lines.append(
+                "Every heading must have text under it. A heading followed directly by a "
+                "deeper heading is fine; a heading followed by nothing but a sibling is "
+                "an empty promise."
+            )
+        elif isinstance(rule, MinEntriesRule):
+            lines.append(f"At least {rule.value} entries in the directory.")
         elif isinstance(rule, CitationClosureRule):
             lines.append(
                 f"Every `[n]` reference in the text must resolve to an entry of the "
