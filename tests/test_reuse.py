@@ -567,3 +567,160 @@ class TestBuiltinSignature:
         (tmp_path / "output").mkdir()
         # empty means "cannot verify" and the caller treats it as changed
         assert builtin_signature(tmp_path / "output", "brief") == ""
+
+
+# --- 7. an edited agent package cannot be reused -----------------------------
+
+
+class TestChangedAgentInvalidatesReuse:
+    """`agents.lock.json` was written from the start and read by nobody (SPEC §10.5)."""
+
+    def test_changed_refs_are_the_ones_whose_hash_moved(self) -> None:
+        from refract.reuse import changed_agent_refs
+
+        prior = {"a@1": "sha256:1", "b@1": "sha256:2"}
+        current = {"a@1": "sha256:1", "b@1": "sha256:CHANGED", "c@1": "sha256:3"}
+        # b changed; c is new to the prior run and so has no reusable output
+        assert changed_agent_refs(prior, current) == {"b@1", "c@1"}
+
+    def test_a_missing_lock_reads_as_everything_changed(self, tmp_path: Path) -> None:
+        """An unreadable record must not be optimism: nothing is provably reusable."""
+        from refract.reuse import changed_agent_refs, read_agents_lock
+
+        assert read_agents_lock(tmp_path) == {}
+        assert changed_agent_refs({}, {"a@1": "sha256:1"}) == {"a@1"}
+
+    def test_node_refs_cover_every_container_element(self) -> None:
+        from refract.models.pipeline import Pipeline
+        from refract.snapshot import node_agent_refs
+
+        pipeline = Pipeline.model_validate(
+            yaml.safe_load(
+                """
+version: "0.1"
+name: p
+input_mode: brief
+nodes:
+  - id: brief
+    type: builtin/brief
+  - id: loop
+    type: loop
+    body:
+      - { agent: w@1, inputs: { brief: brief.brief } }
+      - { agent: fix@1, inputs: { draft: "@prev" } }
+    critic: { agent: judge@1, inputs: { draft: "@body" } }
+    outputs: { doc: "@body" }
+"""
+            )
+        )
+        refs = node_agent_refs(pipeline)
+        # every element of the chain AND the critic: editing any of them invalidates
+        assert refs["loop"] == {"w@1", "fix@1", "judge@1"}
+        assert refs["brief"] == set()
+
+    def test_editing_a_prompt_makes_the_node_recompute(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Reuse with nothing forced: only the edited agent's node runs again."""
+        from refract.cli import AppConfig, run_impl
+        from refract.models.config import ProvidersFile
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        library = tmp_path / "library"
+        shutil.copytree(REPO_ROOT / "library", library)
+        project = tmp_path / "demo-project"
+        shutil.copytree(
+            REPO_ROOT / "examples" / "demo-project",
+            project,
+            ignore=shutil.ignore_patterns("runs"),
+        )
+        providers = ProvidersFile.model_validate(
+            {
+                "providers": {
+                    "claude": {"api_key_env": "ANTHROPIC_API_KEY", "max_concurrent": 4}
+                }
+            }
+        )
+        app = AppConfig(library_path=library, providers=providers)
+        req = "# Requirements: Demo\n\n- FR-1: the system shall do a thing.\n"
+
+        def _first(app: AppConfig, pipeline: Pipeline) -> MockRuntime:
+            return MockRuntime(
+                {"write:*": [ScriptedResponse(files={"requirements.md": req})]}
+            )
+
+        status_a, _run_a = run_impl(
+            project, app=app, runtime_factory=_first, run_id="run_a", clock=_clock_seq()
+        )
+        assert status_a is RunStatus.completed
+
+        # the one thing a person actually does between runs
+        prompt = library / "agents" / "demo_writer" / "prompt.md"
+        prompt.write_text(
+            prompt.read_text("utf-8") + "\nAnd one more instruction.\n", encoding="utf-8"
+        )
+
+        tracking = _TrackingRuntime({"write:*": {"requirements.md": req}})
+
+        status_b, run_b = run_impl(
+            project,
+            app=app,
+            runtime_factory=lambda app, pipeline: tracking,
+            run_id="run_b",
+            reuse_run_id="run_a",
+            clock=_clock_seq(),
+        )
+        assert status_b is RunStatus.completed
+        # nothing was forced on the command line; the changed package did it
+        assert tracking.executed != [], "the edited prompt was silently reused"
+        ledger_b = Ledger.load(run_b)
+        assert ledger_b.get_step("write:alpha-txt").status is StepStatus.done
+
+    def test_an_untouched_library_still_reuses(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The control: without an edit the node is reused, or the check is worthless."""
+        from refract.cli import AppConfig, run_impl
+        from refract.models.config import ProvidersFile
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        library = tmp_path / "library"
+        shutil.copytree(REPO_ROOT / "library", library)
+        project = tmp_path / "demo-project"
+        shutil.copytree(
+            REPO_ROOT / "examples" / "demo-project",
+            project,
+            ignore=shutil.ignore_patterns("runs"),
+        )
+        providers = ProvidersFile.model_validate(
+            {
+                "providers": {
+                    "claude": {"api_key_env": "ANTHROPIC_API_KEY", "max_concurrent": 4}
+                }
+            }
+        )
+        app = AppConfig(library_path=library, providers=providers)
+        req = "# Requirements: Demo\n\n- FR-1: the system shall do a thing.\n"
+
+        def _first(app: AppConfig, pipeline: Pipeline) -> MockRuntime:
+            return MockRuntime(
+                {"write:*": [ScriptedResponse(files={"requirements.md": req})]}
+            )
+
+        status_a, _ = run_impl(
+            project, app=app, runtime_factory=_first, run_id="run_a", clock=_clock_seq()
+        )
+        assert status_a is RunStatus.completed
+
+        tracking = _TrackingRuntime({"write:*": {"requirements.md": req}})
+        status_b, run_b = run_impl(
+            project,
+            app=app,
+            runtime_factory=lambda app, pipeline: tracking,
+            run_id="run_b",
+            reuse_run_id="run_a",
+            clock=_clock_seq(),
+        )
+        assert status_b is RunStatus.completed
+        assert tracking.executed == []
+        assert Ledger.load(run_b).get_step("write:alpha-txt").status is StepStatus.reused

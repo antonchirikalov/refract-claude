@@ -1205,6 +1205,89 @@ nodes:
         _order, errors = validate_pipeline(pipeline, ctx)
         assert Code.E_GATE_RULES_SHAPE not in _codes(errors)
 
+    def _yaml_rule(self, agent: str, rule: str) -> str:
+        return f"""
+version: "0.1"
+name: p
+input_mode: brief
+nodes:
+  - id: brief
+    type: builtin/brief
+  - id: write
+    type: agent
+    agent: {agent}
+    inputs: {{ brief: brief.brief }}
+    gate_rules:
+      - {rule}
+"""
+
+    def test_markdown_rules_on_a_markdown_port_are_accepted(
+        self, tmp_path: Path
+    ) -> None:
+        ctx = make_ctx(tmp_path, agents=self._AGENTS)
+        for rule in ("{ rule: prose_chars, max: 12000 }", "{ rule: no_empty_sections }"):
+            _order, errors = validate_pipeline(
+                _pipeline(self._yaml_rule("writer@1", rule)), ctx
+            )
+            assert Code.E_GATE_RULES_SHAPE not in _codes(errors), rule
+
+    def test_markdown_rules_on_a_json_port_yield_e_gate_rules_shape(
+        self, tmp_path: Path
+    ) -> None:
+        """On JSON these rules do not refuse — they LIE: braces count as prose and a
+        document with no headings has no empty ones. Emptiness of JSON is its schema's
+        question (SPEC-DSL §5.1)."""
+        agents = {
+            "jsonner@1": agent_spec(
+                "jsonner",
+                consumes=[{"port": "brief", "type": "brief@v1"}],
+                produces=[{"port": "out", "type": "extract@v1"}],
+            )
+        }
+        ctx = make_ctx(tmp_path, agents=agents)
+        for rule in ("{ rule: prose_chars, max: 12000 }", "{ rule: no_empty_sections }"):
+            _order, errors = validate_pipeline(
+                _pipeline(self._yaml_rule("jsonner@1", rule)), ctx
+            )
+            assert Code.E_GATE_RULES_SHAPE in _codes(errors), rule
+
+    def test_forbid_file_that_is_missing_is_caught_before_the_run(
+        self, tmp_path: Path
+    ) -> None:
+        """A gate with no patterns reads exactly like a gate that passed, so the list
+        is checked at validation and not only when the step is paid for (SPEC §5)."""
+        ctx = make_ctx(tmp_path, agents=self._AGENTS)
+        _order, errors = validate_pipeline(
+            _pipeline(
+                self._yaml_rule("writer@1", "{ rule: forbid_file, path: nope.txt }")
+            ),
+            ctx,
+        )
+        assert Code.E_FORBID_FILE in _codes(errors)
+
+    def test_forbid_file_that_exists_passes_validation(self, tmp_path: Path) -> None:
+        ctx = make_ctx(tmp_path, agents=self._AGENTS)
+        # the test registry's library root is tmp_path itself
+        (tmp_path / "bans.txt").write_text("стоит отметить\n", encoding="utf-8")
+        _order, errors = validate_pipeline(
+            _pipeline(
+                self._yaml_rule("writer@1", "{ rule: forbid_file, path: bans.txt }")
+            ),
+            ctx,
+        )
+        assert Code.E_FORBID_FILE not in _codes(errors)
+
+    def test_forbid_file_with_no_patterns_is_caught(self, tmp_path: Path) -> None:
+        ctx = make_ctx(tmp_path, agents=self._AGENTS)
+        (tmp_path / "bans.txt").write_text("# только комментарий\n", encoding="utf-8")
+        _order, errors = validate_pipeline(
+            _pipeline(
+                self._yaml_rule("writer@1", "{ rule: forbid_file, path: bans.txt }")
+            ),
+            ctx,
+        )
+        assert Code.E_FORBID_FILE in _codes(errors)
+
 
 # --- W_THRESHOLDS: a floor that only passes when the finder over-delivers ----
 

@@ -87,6 +87,27 @@ def resolve_model(
 # --- used-agent discovery ---------------------------------------------------
 
 
+def node_agent_refs(pipeline: Pipeline) -> dict[str, set[str]]:
+    """Which agent packages each node binds, keyed by node id.
+
+    Needed to turn "this agent package changed" into "these nodes cannot be reused"
+    (SPEC §10.5). Builtins bind none and simply get an empty set.
+    """
+    out: dict[str, set[str]] = {}
+    for node in pipeline.nodes:
+        if isinstance(node, AgentNode):
+            out[node.id] = {node.agent}
+        elif isinstance(node, LoopNode):
+            out[node.id] = {b.agent for b in node.body_chain} | {node.critic.agent}
+        elif isinstance(node, SelectNode):
+            out[node.id] = {node.selector.agent}
+        elif isinstance(node, DiscoverNode):
+            out[node.id] = {node.agent}
+        else:
+            out[node.id] = set()
+    return out
+
+
 def used_agent_refs(pipeline: Pipeline) -> list[str]:
     """Distinct ``name@version`` refs the graph binds, in first-seen order."""
     refs: list[str] = []

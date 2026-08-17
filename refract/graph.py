@@ -20,7 +20,12 @@ from pydantic import ValidationError as PydanticValidationError
 from refract.builtins import BUILTINS, BuiltinDef
 from refract.models.agent import AgentSpec, Port
 from refract.models.errors import Code, ValidationError
-from refract.models.types import ForbidFileRule, MinEntriesRule
+from refract.models.types import (
+    ForbidFileRule,
+    MinEntriesRule,
+    NoEmptySectionsRule,
+    ProseCharsRule,
+)
 from refract.models.pipeline import (
     AgentNode,
     BodyBlock,
@@ -509,6 +514,23 @@ class _Validator:
                 node_id,
                 f"gate_rules apply to the primary port {primary[0].port!r}, which is "
                 f"{rtype.kind.value}-kind — only min_entries applies to a directory",
+            )
+        # Rules that read MARKDOWN structure. On a JSON artifact they run and lie: braces
+        # and keys are counted as prose, and every heading is missing because JSON has
+        # none. Same class of mistake as `min_entries` on a file — a rule that cannot
+        # mean what it says, silently promising a guarantee.
+        markdown_rules = [
+            r
+            for r in gate_rules
+            if isinstance(r, (ProseCharsRule, NoEmptySectionsRule))
+        ]
+        if markdown_rules and rtype.format is not None and rtype.format.value == "json":
+            names = ", ".join(sorted({r.rule for r in markdown_rules}))
+            self.err(
+                Code.E_GATE_RULES_SHAPE,
+                node_id,
+                f"{names} read markdown structure; port {primary[0].port!r} is "
+                "format=json — count its emptiness with the type's JSON schema instead",
             )
         self._check_forbid_files(node_id, gate_rules)
 

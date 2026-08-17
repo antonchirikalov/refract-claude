@@ -45,7 +45,8 @@ from refract.models.pipeline import AgentNode, Pipeline
 from refract.registry import ArtifactRegistry
 from refract.runtime.base import AgentRuntime
 from refract.scheduler import node_dependencies, run_pipeline
-from refract.snapshot import build_snapshot
+from refract.reuse import changed_agent_refs, read_agents_lock
+from refract.snapshot import build_snapshot, node_agent_refs
 from refract.state import Ledger, read_state
 from refract.templates_lib import find_template, list_templates
 
@@ -514,7 +515,7 @@ def run_impl(
     run_dir = proj.runs_dir / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    build_snapshot(
+    snapshot = build_snapshot(
         run_dir,
         pipeline_path=proj.pipeline_path,
         pipeline=pipeline_obj,
@@ -523,6 +524,22 @@ def run_impl(
         overrides=model_overrides,
         default_model=proj.config.defaults.model,
     )
+    # An agent package that changed since the run being reused cannot have its node
+    # reused: the output on disk was produced by a different prompt. The lock has
+    # recorded these hashes from the beginning and nothing compared them, so the one
+    # case a person actually hits — fix a prompt, rerun — silently kept the old result.
+    if reuse_run_dir is not None:
+        changed = changed_agent_refs(
+            read_agents_lock(reuse_run_dir), snapshot.agents_lock
+        )
+        if changed:
+            per_node = node_agent_refs(pipeline_obj)
+            stale = sorted(nid for nid, refs in per_node.items() if refs & changed)
+            force_nodes = sorted(set(force_nodes or []) | set(stale))
+            typer.echo(
+                f"agents changed since {reuse_run_id}: {', '.join(sorted(changed))}"
+                f" → recomputing {', '.join(stale)}"
+            )
     # Execute from the snapshot (I7/§9): resolved.yaml carries effective models.
     exec_pipeline, exec_agents = _load_snapshot(run_dir, library_path=app.library_path)
     ledger = Ledger.create(

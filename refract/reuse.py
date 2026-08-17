@@ -49,6 +49,30 @@ def recompute_set(deps: dict[str, set[str]], force_nodes: list[str]) -> set[str]
     return force | descendants(deps, force)
 
 
+def read_agents_lock(run_dir: Path) -> dict[str, str]:
+    """A prior run's ``snapshot/agents.lock.json``, or empty if unreadable."""
+    path = Path(run_dir) / "snapshot" / "agents.lock.json"
+    try:
+        data = json.loads(path.read_text("utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
+
+
+def changed_agent_refs(prior: dict[str, str], current: dict[str, str]) -> set[str]:
+    """Agent refs whose package differs from the prior run's, or is new to it.
+
+    The lock existed from the start and nothing read it, which made the reuse decision
+    quietly wrong in the one case a person actually hits: edit an agent's prompt.md, rerun
+    from somewhere else, and the node running that agent is reused wholesale — the fix is
+    on disk, the run does not contain it, and nothing says so. A record produced and never
+    read is the failure this project keeps paying for; this is the read.
+
+    A ref the prior run did not have counts as changed: it cannot have a reusable output.
+    """
+    return {ref for ref, digest in current.items() if prior.get(ref) != digest}
+
+
 def copy_tree_linked(src: Path, dst: Path) -> None:
     """Recreate ``src`` at ``dst`` reusing files via :func:`link_or_copy` (§10.5)."""
     if not src.exists():

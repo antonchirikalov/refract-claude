@@ -57,6 +57,7 @@ from refract.registry import (
 from refract.runtime.base import AgentRuntime
 from refract import reuse
 from refract.metanodes import MetaContext, run_loop, run_select
+from refract.snapshot import node_agent_refs
 from refract.state import Ledger
 from refract.steps import (
     AgentStepPlan,
@@ -653,6 +654,23 @@ async def run_pipeline(
     recompute: set[str] = (
         reuse.recompute_set(deps, ledger.state.force_nodes) if reuse_dir else set()
     )
+    # Nodes whose agent PACKAGE differs from the run being reused. Enforced here rather
+    # than only in the CLI because the identity of a reusable result is (inputs, agent),
+    # and only one half of that was ever checked: `agents.lock.json` recorded these
+    # hashes from the beginning and nothing compared them. Both locks are read off disk,
+    # so a resumed rerun reaches the same conclusion as the launch did.
+    stale_agents = (
+        reuse.changed_agent_refs(
+            reuse.read_agents_lock(reuse_dir), reuse.read_agents_lock(run_dir)
+        )
+        if reuse_dir is not None
+        else set()
+    )
+    stale_agent_nodes = {
+        nid
+        for nid, refs in node_agent_refs(pipeline).items()
+        if refs & stale_agents
+    }
     changed_nodes: set[str] = set()  # nodes re-executed with (assumed) different output
 
     def reuse_node(node: Node) -> NodeStatus:
@@ -812,9 +830,13 @@ async def run_pipeline(
         results: dict[str, StepOutcome] = {}
         # element diff (SPEC §10.5): an input item whose (slug, source_hash)
         # matches an ok element of the reuse run reuses that element's step.
+        # An element is reusable when its INPUT is unchanged and the agent that would
+        # process it is the same one that did. Dropping the second half meant an edited
+        # prompt reran nothing at all on a map node: every element matched by
+        # (slug, source_hash) and was copied from the previous run.
         reuse_idx = (
             reuse.map_reuse_index(reuse_dir, node.id, spec.out_port)
-            if reuse_dir is not None
+            if reuse_dir is not None and node.id not in stale_agent_nodes
             else {}
         )
 
@@ -1045,6 +1067,7 @@ async def run_pipeline(
         if (
             reuse_dir is not None
             and node_id not in recompute
+            and node_id not in stale_agent_nodes  # its prompt is not the one that ran
             and not isinstance(node, BuiltinNode)
             and not any(d in changed_nodes for d in deps[node_id])
             and reusable(node)  # only reuse a node that succeeded in the prior run
