@@ -571,3 +571,71 @@ class TestMapWorkersSemaphore:
 
         assert status is RunStatus.completed
         assert runtime.max_concurrency == 3
+
+
+# --- gate_rules on a map node run per element (SPEC §8/§5.1) ----------------
+#
+# Added after the same field turned out never to run on a loop body: `_plan` was reading
+# it off `block.params`, which has no such field, and nothing noticed for as long as the
+# feature existed. The map path passes `node.gate_rules` directly and is therefore
+# correct — but it was equally unproven, and an unproven live path is how the loop defect
+# survived 645 passing tests.
+
+
+@pytest.mark.asyncio
+async def test_map_gate_rules_apply_to_every_element(tmp_path: Path) -> None:
+    doc = """
+version: "0.1"
+name: mapdemo
+nodes:
+  - id: scan
+    type: builtin/seed
+    params: { items: [{"slug": "a", "payload": {"src.txt": "A"}}, {"slug": "b", "payload": {"src.txt": "B"}}] }
+  - id: extract
+    type: agent
+    agent: source_processor@1
+    map: scan.sources
+    params: { model: "mock/mock-1", gate_retries: 0, infra_retries: 0, min_ok: 1 }
+    gate_rules:
+      - { rule: min_length, value: 5000 }
+"""
+    pipeline = Pipeline.model_validate(yaml.safe_load(doc))
+    runtime = MockRuntime(
+        {"extract:*": [ScriptedResponse(files={"extract.json": '{"x": 1}'})]}
+    )
+    status, ledger, run_dir = await _run(tmp_path, pipeline, runtime)
+    # every element violates the rule, so every element fails and the node cannot pass
+    assert status is RunStatus.failed
+    for slug in ("a", "b"):
+        report = json.loads(
+            (run_dir / "steps" / "extract" / slug / "gate_report.json").read_text("utf-8")
+        )
+        assert report["ok"] is False, slug
+        assert any("min_length 5000" in p for p in report["ports"][0]["problems"]), slug
+
+
+@pytest.mark.asyncio
+async def test_map_gate_rules_reach_each_element_prompt(tmp_path: Path) -> None:
+    """The requirement is generated into the prompt from the same list (I5)."""
+    doc = """
+version: "0.1"
+name: mapdemo
+nodes:
+  - id: scan
+    type: builtin/seed
+    params: { items: [{"slug": "a", "payload": {"src.txt": "A"}}] }
+  - id: extract
+    type: agent
+    agent: source_processor@1
+    map: scan.sources
+    params: { model: "mock/mock-1", gate_retries: 0, infra_retries: 0, min_ok: 1 }
+    gate_rules:
+      - { rule: min_length, value: 4242 }
+"""
+    pipeline = Pipeline.model_validate(yaml.safe_load(doc))
+    runtime = MockRuntime(
+        {"extract:*": [ScriptedResponse(files={"extract.json": '{"x": 1}'})]}
+    )
+    _status, _ledger, run_dir = await _run(tmp_path, pipeline, runtime)
+    prompt = run_dir / "steps" / "extract" / "a" / "prompt.md"
+    assert "At least 4242 characters" in prompt.read_text("utf-8")
