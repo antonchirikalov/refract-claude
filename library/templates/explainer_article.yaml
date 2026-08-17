@@ -142,10 +142,15 @@ nodes:
       # whether the example demonstrates what the text claims, whether every figure the
       # article promises is one a reader would need.
       #
-      # It gets the analysis rather than the notes, and that is deliberate now that the
-      # fact checker runs in the same round: two agents doing one job meant the second
-      # was done badly, and dropping the note ports also halves what the most expensive
-      # call of the round reads.
+      # It still receives the notes, because its contract requires them, but attribution
+      # is no longer its job: the fact checker settles that inside the same round, and a
+      # remark of the form "no note supports this" costs a round to fix while a corrector
+      # closes it in place. The notes stay useful here for the mechanism itself — tracing
+      # a dimension or a multiplier back to the paper that carries it.
+      #
+      # Dropping the ports outright would halve what the most expensive call of the round
+      # reads, and it needs the agent contract changed rather than a port omitted here;
+      # left for when the round's cost is measured on this pipeline rather than assumed.
       agent: article_critic@1
       model: claude/opus
       inputs:
