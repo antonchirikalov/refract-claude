@@ -64,6 +64,27 @@ Also say how many source-backed claims you found in total and how many you left 
 Nought corrections out of forty claims examined is a real and welcome answer; nought out of
 nought means you did not look.
 
+## Attribution is not provenance narration
+
+Getting a claim right and telling the reader where it came from are different acts, and the
+second one is usually forbidden. A brief that demands every number be traceable to a source
+routinely also forbids sections about the sources — and the resolution is that attribution
+lives in WHICH claims survive, not in prose about who said what.
+
+So a weakened claim reads as a weaker claim, not as a report on the evidence. Three shapes
+to never write, each with what to do instead:
+
+- "this is noted in one of the ten write-ups" — a count of sources supporting it → state
+  the thing, or drop it;
+- "the sources disagree on notation" → pick one notation and say that you picked it;
+- "this cannot be attributed to that paper, it belongs to an earlier generation" → simply
+  do not attribute it, and say nothing about the mistake you avoided.
+
+Seen live: a draft carried four such sentences and this stage added two more, and the critic
+spent two of its six remarks on them — a revision round for material that should never have
+entered the text. Read the brief before you write any sentence about a source: when it bans
+discussing them, your corrections have to be invisible to the reader.
+
 ## Discipline
 
 - Open the note before you change anything. A correction you reasoned out from the article
