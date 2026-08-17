@@ -52,14 +52,34 @@ def link_or_copy(src: Path | str, dst: Path | str) -> None:
     dst = Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
     try:
-        os.symlink(src, dst, target_is_directory=src.is_dir())
+        # An ABSOLUTE target: a relative one is resolved against the directory holding
+        # the link, not against this process's cwd, so a run tree addressed relatively
+        # (``refract run my-project``) would get links pointing at nothing — and a
+        # dangling link is worse than a failed copy, because the step then reads an
+        # empty input and blames the agent.
+        os.symlink(src.resolve(), dst, target_is_directory=src.is_dir())
         return
     except (OSError, NotImplementedError):
         pass
-    if src.is_dir():
-        shutil.copytree(long_path(src), long_path(dst))
-    else:
-        shutil.copy2(long_path(src), long_path(dst))
+    try:
+        if src.is_dir():
+            shutil.copytree(long_path(src), long_path(dst))
+        else:
+            shutil.copy2(long_path(src), long_path(dst))
+    except OSError as exc:
+        # A bare "[WinError 123] The filename, directory name, or volume label syntax
+        # is incorrect" names neither path, and this is the single funnel every input
+        # and every reused artifact passes through — so the one error that can be
+        # raised here has to say what it was copying. Diagnosing it from a traceback
+        # cost a live run: the frame shows `link_or_copy(child, port_dir / child.name)`
+        # and no values, and the paths that reach it are built from agent-chosen names.
+        raise OSError(
+            f"{exc.strerror or exc} while copying\n"
+            f"  from: {src}\n"
+            f"    ->  {long_path(src)}\n"
+            f"  to:   {dst}\n"
+            f"    ->  {long_path(dst)}"
+        ) from exc
 
 
 # --- artifact naming (SPEC §10.4) ------------------------------------------
