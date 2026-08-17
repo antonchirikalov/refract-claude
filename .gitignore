@@ -47,3 +47,7 @@ web/dist/
 
 web/test-results/
 web/playwright-report/
+
+# IDE scratch that landed in the templates dir by accident
+.idea/
+*.code-workspace
