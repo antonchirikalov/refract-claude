@@ -657,7 +657,8 @@ nodes:
         # the one thing a person actually does between runs
         prompt = library / "agents" / "demo_writer" / "prompt.md"
         prompt.write_text(
-            prompt.read_text("utf-8") + "\nAnd one more instruction.\n", encoding="utf-8"
+            prompt.read_text("utf-8") + "\nAnd one more instruction.\n",
+            encoding="utf-8",
         )
 
         tracking = _TrackingRuntime({"write:*": {"requirements.md": req}})
@@ -723,4 +724,6 @@ nodes:
         )
         assert status_b is RunStatus.completed
         assert tracking.executed == []
-        assert Ledger.load(run_b).get_step("write:alpha-txt").status is StepStatus.reused
+        assert (
+            Ledger.load(run_b).get_step("write:alpha-txt").status is StepStatus.reused
+        )

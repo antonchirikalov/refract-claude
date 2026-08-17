@@ -165,7 +165,9 @@ class TestProjectReferencesATemplate:
             project, None, library_path=self.LIBRARY, home=tmp_path / "home"
         )
         assert proj.pipeline_name == "explainer_article"
-        assert proj.pipeline_path == self.LIBRARY / "templates" / "explainer_article.yaml"
+        assert (
+            proj.pipeline_path == self.LIBRARY / "templates" / "explainer_article.yaml"
+        )
 
     def test_no_copy_is_needed_in_the_project(self, tmp_path: Path) -> None:
         """The point of the feature: the project is a brief and a name, nothing else."""
@@ -174,7 +176,9 @@ class TestProjectReferencesATemplate:
             'version: "0.1"\nname: p\npipeline: explainer_article\n',
         )
         assert not (project / "pipelines").exists()
-        resolve_project(project, None, library_path=self.LIBRARY, home=tmp_path / "home")
+        resolve_project(
+            project, None, library_path=self.LIBRARY, home=tmp_path / "home"
+        )
 
     def test_both_a_template_and_local_files_is_refused(self, tmp_path: Path) -> None:
         """Not resolved by precedence: which is meant is what the author must say."""

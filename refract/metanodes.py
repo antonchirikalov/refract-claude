@@ -26,6 +26,7 @@ from refract.models.ledger import NodeStatus, StepOutcome, StepState, StepStatus
 from refract.models.pipeline import (
     AgentNode,
     BodyBlock,
+    CriticBlock,
     LoopNode,
     Node,
     SelectNode,
@@ -193,7 +194,7 @@ async def run_loop(node: LoopNode, ctx: MetaContext) -> NodeStatus:
                     agent_ref=block.agent,
                     model=ctx.resolve_model(model_raw),
                     inputs=inputs + internal,
-                    block=block.params,
+                    block=block,
                     revision=revision,
                 ),
             )
@@ -214,7 +215,7 @@ async def run_loop(node: LoopNode, ctx: MetaContext) -> NodeStatus:
                 agent_ref=node.critic.agent,
                 model=critic_model,
                 inputs=_critic_inputs(ctx, node, critic_agent, last_agent, body_out),
-                block=node.critic.params,
+                block=node.critic,
                 revision=None,
             ),
         )
@@ -285,11 +286,24 @@ def _plan(
     agent_ref: str,
     model: str,
     inputs: list[InputSpec],
-    block: object,
+    block: BodyBlock | CriticBlock,
     revision: RevisionContext | None,
 ) -> AgentStepPlan:
+    """Build the step plan for one element of a loop.
+
+    ``block`` is the BLOCK, not its ``params``. It used to be the params, and the
+    difference was silent: ``SubBlockParams`` has no ``gate_rules`` field, so
+    ``getattr(block, "gate_rules", [])`` returned an empty list for every body and every
+    critic — declared rules validated, resolved into ``resolved.yaml``, and then vanished
+    at the last handoff. Measured live: a writer whose node asked for 8 000-12 000
+    characters of prose was never told so (the bound is generated into the prompt from
+    the same list) and produced 24 812, which the gate then passed because it was
+    checking the type's rules alone.
+    """
+    params = block.params
+
     def pick(field: str, fallback: int) -> int:
-        val = getattr(block, field, None) if block is not None else None
+        val = getattr(params, field, None) if params is not None else None
         if val is not None:
             return int(val)
         loop_val = getattr(node.params, field, None)
@@ -309,8 +323,9 @@ def _plan(
         gate_retries=pick("gate_retries", 2),
         infra_retries=pick("infra_retries", 2),
         revision=revision,
-        # a loop's body/critic block may tighten its own gate (SPEC §8)
-        gate_rules=list(getattr(block, "gate_rules", []) or []),
+        # a loop's body/critic block may tighten its own gate (SPEC §8). Read off the
+        # BLOCK: reading it off `block.params` is how these silently never ran.
+        gate_rules=list(block.gate_rules),
     )
 
 

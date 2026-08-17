@@ -1225,7 +1225,10 @@ nodes:
         self, tmp_path: Path
     ) -> None:
         ctx = make_ctx(tmp_path, agents=self._AGENTS)
-        for rule in ("{ rule: prose_chars, max: 12000 }", "{ rule: no_empty_sections }"):
+        for rule in (
+            "{ rule: prose_chars, max: 12000 }",
+            "{ rule: no_empty_sections }",
+        ):
             _order, errors = validate_pipeline(
                 _pipeline(self._yaml_rule("writer@1", rule)), ctx
             )
@@ -1245,7 +1248,10 @@ nodes:
             )
         }
         ctx = make_ctx(tmp_path, agents=agents)
-        for rule in ("{ rule: prose_chars, max: 12000 }", "{ rule: no_empty_sections }"):
+        for rule in (
+            "{ rule: prose_chars, max: 12000 }",
+            "{ rule: no_empty_sections }",
+        ):
             _order, errors = validate_pipeline(
                 _pipeline(self._yaml_rule("jsonner@1", rule)), ctx
             )

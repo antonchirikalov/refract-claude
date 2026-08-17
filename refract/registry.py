@@ -328,7 +328,9 @@ def apply_rules(
                 hits = len(re.findall(pattern, hay, flags))
                 if hits > rule.max_hits:
                     allowed = (
-                        "" if rule.max_hits == 0 else f" (up to {rule.max_hits} allowed)"
+                        ""
+                        if rule.max_hits == 0
+                        else f" (up to {rule.max_hits} allowed)"
                     )
                     failures.append(
                         f"forbidden pattern {pattern!r} "

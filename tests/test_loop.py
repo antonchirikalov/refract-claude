@@ -509,3 +509,191 @@ def test_single_element_body_keeps_historical_ids(tmp_path: Path) -> None:
     assert status is RunStatus.completed
     assert "refine.body:r1" in ledger.state.steps
     assert (run_dir / "steps" / "refine" / "body_r1").is_dir()
+
+
+# --- gate_rules on a body/critic block actually run (SPEC §8/§5.1) ----------
+#
+# They did not, and nothing noticed. `_plan` was handed `block.params`, and
+# `SubBlockParams` has no `gate_rules` field, so every declared rule resolved into
+# `resolved.yaml` and then vanished at the last handoff. Measured on a live run: a writer
+# whose node asked for 8 000-12 000 characters of prose was never told so — the bound is
+# generated into the prompt from the same list — and produced 24 812, which the gate then
+# passed because it was checking the artifact type's own rules alone.
+
+
+def _gated_pipeline(
+    *, body_rules: list | None = None, critic_rules: list | None = None
+):
+    body: dict = {"agent": "writer@1"}
+    if body_rules is not None:
+        body["gate_rules"] = body_rules
+    critic: dict = {"agent": "critic@1", "inputs": {"draft": "@body"}}
+    if critic_rules is not None:
+        critic["gate_rules"] = critic_rules
+    return Pipeline.model_validate(
+        {
+            "version": "0.1",
+            "name": "refine",
+            "nodes": [
+                {
+                    "id": "refine",
+                    "type": "loop",
+                    "params": {
+                        "max_rounds": 1,
+                        "on_max_rounds": "pass",
+                        "model": "kimi/kimi-k3",
+                        "gate_retries": 0,
+                    },
+                    "body": body,
+                    "critic": critic,
+                    "outputs": {"doc": "@body"},
+                }
+            ],
+        }
+    )
+
+
+def test_body_gate_rules_are_enforced(tmp_path: Path) -> None:
+    """A body rule the draft violates must FAIL the step, not be ignored."""
+    _, agents, reg = _library(tmp_path)
+    pl = _gated_pipeline(body_rules=[{"rule": "min_length", "value": 5000}])
+    status, ledger, run_dir = _run(
+        tmp_path,
+        pl,
+        agents,
+        reg,
+        {
+            "refine.body:r1": [ScriptedResponse(files={"doc.md": DOC1})],  # ~30 chars
+            "refine.critic:r1": [
+                ScriptedResponse(files={"verdict.json": _verdict("approved")})
+            ],
+        },
+    )
+    assert status is RunStatus.failed
+    report = json.loads(
+        (run_dir / "steps" / "refine" / "body_r1" / "gate_report.json").read_text(
+            "utf-8"
+        )
+    )
+    assert report["ok"] is False
+    assert any("min_length 5000" in p for p in report["ports"][0]["problems"])
+
+
+def test_body_gate_rules_reach_the_prompt(tmp_path: Path) -> None:
+    """The requirement is GENERATED into the prompt from the same list (I5).
+
+    The writer being told the number is half of what the rule buys: without it the first
+    draft is written blind and the gate can only reject it after it is paid for.
+    """
+    _, agents, reg = _library(tmp_path)
+    pl = _gated_pipeline(body_rules=[{"rule": "min_length", "value": 5000}])
+    _status, _ledger, run_dir = _run(
+        tmp_path,
+        pl,
+        agents,
+        reg,
+        {
+            "refine.body:r1": [ScriptedResponse(files={"doc.md": DOC1})],
+            "refine.critic:r1": [
+                ScriptedResponse(files={"verdict.json": _verdict("approved")})
+            ],
+        },
+    )
+    prompt = (run_dir / "steps" / "refine" / "body_r1" / "prompt.md").read_text("utf-8")
+    assert "At least 5000 characters" in prompt
+
+
+def test_body_gate_rules_measure_on_a_pass(tmp_path: Path) -> None:
+    """A rule that runs records what it measured, pass or fail (SPEC §10.2)."""
+    _, agents, reg = _library(tmp_path)
+    pl = _gated_pipeline(body_rules=[{"rule": "min_length", "value": 10}])
+    status, _ledger, run_dir = _run(
+        tmp_path,
+        pl,
+        agents,
+        reg,
+        {
+            "refine.body:r1": [ScriptedResponse(files={"doc.md": DOC1})],
+            "refine.critic:r1": [
+                ScriptedResponse(files={"verdict.json": _verdict("approved")})
+            ],
+        },
+    )
+    assert status is RunStatus.completed
+    report = json.loads(
+        (run_dir / "steps" / "refine" / "body_r1" / "gate_report.json").read_text(
+            "utf-8"
+        )
+    )
+    assert report["ports"][0]["measures"]["min_length"] == 10
+
+
+def test_critic_gate_rules_are_enforced(tmp_path: Path) -> None:
+    """`loop.critic` carries the field too (SPEC-DSL §5.1), so it must run there."""
+    _, agents, reg = _library(tmp_path)
+    pl = _gated_pipeline(critic_rules=[{"rule": "min_length", "value": 5000}])
+    status, _ledger, run_dir = _run(
+        tmp_path,
+        pl,
+        agents,
+        reg,
+        {
+            "refine.body:r1": [ScriptedResponse(files={"doc.md": DOC1})],
+            "refine.critic:r1": [
+                ScriptedResponse(files={"verdict.json": _verdict("approved")})
+            ],
+        },
+    )
+    assert status is RunStatus.failed
+    report = json.loads(
+        (run_dir / "steps" / "refine" / "critic_r1" / "gate_report.json").read_text(
+            "utf-8"
+        )
+    )
+    assert report["ok"] is False
+
+
+def test_block_params_still_apply(tmp_path: Path) -> None:
+    """The fix moved `block` from its params to the block; params must still work."""
+    _, agents, reg = _library(tmp_path)
+    pl = Pipeline.model_validate(
+        {
+            "version": "0.1",
+            "name": "refine",
+            "nodes": [
+                {
+                    "id": "refine",
+                    "type": "loop",
+                    "params": {
+                        "max_rounds": 1,
+                        "on_max_rounds": "pass",
+                        "model": "kimi/kimi-k3",
+                        "gate_retries": 5,
+                    },
+                    # the BLOCK overrides the loop: no retries here
+                    "body": {
+                        "agent": "writer@1",
+                        "params": {"gate_retries": 0},
+                        "gate_rules": [{"rule": "min_length", "value": 5000}],
+                    },
+                    "critic": {"agent": "critic@1", "inputs": {"draft": "@body"}},
+                    "outputs": {"doc": "@body"},
+                }
+            ],
+        }
+    )
+    status, ledger, _run_dir = _run(
+        tmp_path,
+        pl,
+        agents,
+        reg,
+        {
+            "refine.body:r1": [ScriptedResponse(files={"doc.md": DOC1})],
+            "refine.critic:r1": [
+                ScriptedResponse(files={"verdict.json": _verdict("approved")})
+            ],
+        },
+    )
+    assert status is RunStatus.failed
+    # one attempt, not six: the block's gate_retries=0 beat the loop's 5
+    assert ledger.state.steps["refine.body:r1"].tries == 1

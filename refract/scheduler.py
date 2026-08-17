@@ -667,9 +667,7 @@ async def run_pipeline(
         else set()
     )
     stale_agent_nodes = {
-        nid
-        for nid, refs in node_agent_refs(pipeline).items()
-        if refs & stale_agents
+        nid for nid, refs in node_agent_refs(pipeline).items() if refs & stale_agents
     }
     changed_nodes: set[str] = set()  # nodes re-executed with (assumed) different output
 

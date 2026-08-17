@@ -950,7 +950,9 @@ class TestProseChars:
         from refract.registry import apply_rules
 
         article = "я" * 120 + "\n\n```\n" + "код\n" * 100 + "```\n"
-        assert apply_rules([MaxLengthRule(rule="max_length", value=1000)], article) == []
+        assert (
+            apply_rules([MaxLengthRule(rule="max_length", value=1000)], article) == []
+        )
         assert apply_rules([self._rule(max=100)], article) != []
 
 
@@ -1048,9 +1050,10 @@ class TestForbidFile:
         from refract.registry import apply_rules
 
         self._list(tmp_path, r"\*\*[^*\n]{1,200}\*\*" + "\n")
-        assert apply_rules(
-            [self._rule("slop.txt")], "Это **важно** понимать.", tmp_path
-        ) != []
+        assert (
+            apply_rules([self._rule("slop.txt")], "Это **важно** понимать.", tmp_path)
+            != []
+        )
 
     def test_a_dead_phrase_inside_a_code_comment_is_not_a_finding(
         self, tmp_path: Path
