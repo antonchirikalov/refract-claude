@@ -589,9 +589,14 @@ def run_impl(
             per_node = node_agent_refs(pipeline_obj)
             stale = sorted(nid for nid, refs in per_node.items() if refs & changed)
             force_nodes = sorted(set(force_nodes or []) | set(stale))
+            # ASCII only, like every other line this command prints: a run's stdout is
+            # read on Windows consoles whose code page is not UTF-8, and an arrow here
+            # raised UnicodeEncodeError from cp1252 and killed the run before its first
+            # step — the message about what would be recomputed became the reason nothing
+            # was.
             typer.echo(
                 f"agents changed since {reuse_run_id}: {', '.join(sorted(changed))}"
-                f" → recomputing {', '.join(stale)}"
+                f" -> recomputing {', '.join(stale)}"
             )
     # Execute from the snapshot (I7/§9): resolved.yaml carries effective models.
     exec_pipeline, exec_agents = _load_snapshot(run_dir, library_path=app.library_path)

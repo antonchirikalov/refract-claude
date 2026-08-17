@@ -622,3 +622,26 @@ class TestCatalogCommand:
         payload = json.loads(capsys.readouterr().out)
         assert payload["version"]
         assert payload["agents"] and payload["builtins"] and payload["constraints"]
+
+
+# --- CLI output stays ASCII (SPEC §14) --------------------------------------
+
+
+def test_cli_output_lines_are_ascii() -> None:
+    """A run's stdout is read on Windows consoles whose code page is not UTF-8.
+
+    The rule was written in `progress_line`'s docstring and checked by nothing. A single
+    `->` written as an arrow raised UnicodeEncodeError out of cp1252 and killed a live run
+    before its first step: the message about what would be recomputed became the reason
+    nothing was.
+    """
+    import refract
+
+    offenders: list[str] = []
+    for path in sorted(Path(refract.__file__).parent.rglob("*.py")):
+        for n, line in enumerate(path.read_text("utf-8").splitlines(), 1):
+            if "typer.echo" not in line and "_echo(" not in line:
+                continue
+            if any(ord(ch) > 127 for ch in line):
+                offenders.append(f"{path.name}:{n}: {line.strip()}")
+    assert offenders == [], offenders
