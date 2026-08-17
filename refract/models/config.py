@@ -24,6 +24,16 @@ class ProjectConfig(BaseModel):
     version: str
     name: str
     input: str = "./input"
+    # Name of a pipeline TEMPLATE from the library, used in place of a local copy in
+    # ``pipelines/`` (SPEC §7). Instantiating by copy is right when a project genuinely
+    # states its own terms — a different ceiling, an extra node — and wrong when it
+    # differs only by subject: ten articles then hold ten byte-identical copies, and a
+    # fix to the template reaches none of them. What makes one article differ from
+    # another is its brief, not its conveyor.
+    #
+    # A project that sets this AND holds files in ``pipelines/`` is refused rather than
+    # resolved by precedence: which one is meant is exactly what the author has to say.
+    pipeline: str | None = None
     defaults: ProjectDefaults = Field(default_factory=ProjectDefaults)
     # Capability confirmation policy (SPEC §17 phase 3): a run pauses for a human
     # to approve any listed capability — explicit names in ``confirm`` and/or every

@@ -223,8 +223,26 @@ class LoadedProject:
         return self.project_dir / "runs"
 
 
-def resolve_project(project_dir: Path | str, pipeline: str | None) -> LoadedProject:
+def resolve_project(
+    project_dir: Path | str,
+    pipeline: str | None,
+    *,
+    library_path: Path | None = None,
+    home: Path | None = None,
+) -> LoadedProject:
     """Load ``project.yaml`` and select the pipeline file (SPEC §7/§14).
+
+    Two ways for a project to have a pipeline, and they are alternatives rather than a
+    precedence order. ``pipeline: <name>`` in ``project.yaml`` REFERENCES a library
+    template — right when the project differs from its siblings only by subject, which
+    for a document conveyor is the usual case: the topic lives in the brief, and ten
+    articles otherwise carry ten byte-identical copies that a template fix never
+    reaches. Files in ``pipelines/`` are a project's OWN pipeline — right when it states
+    its own terms and expects to diverge.
+
+    Setting both is refused. The run is pinned by the snapshot either way, so nothing
+    downstream can tell which was meant, and guessing is cheap to get wrong and
+    invisible when it is.
 
     ``--pipeline`` is required when ``pipelines/`` holds more than one file.
     """
@@ -241,8 +259,43 @@ def resolve_project(project_dir: Path | str, pipeline: str | None) -> LoadedProj
         if pipelines_dir.is_dir()
         else []
     )
+    if config.pipeline is not None:
+        if available:
+            names = ", ".join(p.stem for p in available)
+            raise UsageError(
+                f"project.yaml names the template {config.pipeline!r} and "
+                f"{pipelines_dir} also holds {names}: say which one is meant — "
+                "reference a template OR keep a local pipeline, not both"
+            )
+        if library_path is None:
+            raise UsageError(
+                f"project.yaml names the template {config.pipeline!r}, but no library "
+                "was configured to resolve it from"
+            )
+        ref = find_template(config.pipeline, library_path, home or refract_home())
+        if ref is None:
+            known = ", ".join(
+                t.name for t in list_templates(library_path, home or refract_home())
+            )
+            raise UsageError(
+                f"no template {config.pipeline!r} in the library (have: {known})"
+            )
+        if pipeline is not None and pipeline != config.pipeline:
+            raise UsageError(
+                f"--pipeline {pipeline!r} contradicts project.yaml, which references "
+                f"the template {config.pipeline!r}"
+            )
+        return LoadedProject(
+            project_dir=project_dir,
+            config=config,
+            pipeline_name=ref.name,
+            pipeline_path=ref.path,
+        )
     if not available:
-        raise UsageError(f"no pipelines in {pipelines_dir}")
+        raise UsageError(
+            f"no pipelines in {pipelines_dir} and project.yaml names no template "
+            "(add `pipeline: <name>` — see `refract templates`)"
+        )
     if pipeline is not None:
         path = pipelines_dir / f"{pipeline}.yaml"
         if not path.exists():
@@ -417,7 +470,7 @@ def validate_impl(
     app: AppConfig,
 ) -> int:
     """Load + validate a project's pipeline; return an exit code (SPEC §8/§14)."""
-    proj = resolve_project(project_dir, pipeline)
+    proj = resolve_project(project_dir, pipeline, library_path=app.library_path)
     registry = ArtifactRegistry.load(app.library_path)
     agents, agent_errors = load_agents(app.library_path)
     ctx = _build_context(
@@ -466,7 +519,7 @@ def run_impl(
     from that prior run and ``force_nodes`` seeds the recompute set (SPEC §10.5).
     """
     model_overrides = model_overrides or {}
-    proj = resolve_project(project_dir, pipeline)
+    proj = resolve_project(project_dir, pipeline, library_path=app.library_path)
     registry = ArtifactRegistry.load(app.library_path)
     agents, agent_errors = load_agents(app.library_path)
     ctx = _build_context(
@@ -608,7 +661,7 @@ def rerun_impl(
     clock: Callable[[], str] = utcnow_iso,
 ) -> tuple[RunStatus, Path]:
     """Rerun-from-node: a new run reusing unchanged nodes from a prior run (§10.5/§14)."""
-    proj = resolve_project(project_dir, pipeline)
+    proj = resolve_project(project_dir, pipeline, library_path=app.library_path)
     reuse_run_id = _resolve_reuse_run(proj.runs_dir, reuse)
     return run_impl(
         project_dir,

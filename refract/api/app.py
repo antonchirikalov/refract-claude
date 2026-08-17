@@ -378,7 +378,9 @@ def create_app(
     def _collect_errors(
         project_dir: Path, pipeline: str, overrides: dict[str, str]
     ) -> list[ValidationError]:
-        proj = resolve_project(project_dir, pipeline)
+        proj = resolve_project(
+            project_dir, pipeline, library_path=st.app_config.library_path
+        )
         registry = ArtifactRegistry.load(st.app_config.library_path)
         agents, agent_errors = load_agents(st.app_config.library_path)
         from refract.cli import _build_context

@@ -144,6 +144,93 @@ class TestResolveProject:
             resolve_project(empty, None)
 
 
+class TestProjectReferencesATemplate:
+    """SPEC §7: a project differing only by subject references the library template."""
+
+    LIBRARY = Path(__file__).resolve().parent.parent / "library"
+
+    def _project(self, tmp_path: Path, body: str) -> Path:
+        project = tmp_path / "proj"
+        (project / "input").mkdir(parents=True)
+        (project / "input" / "brief.md").write_text("Тема.", encoding="utf-8")
+        (project / "project.yaml").write_text(body, encoding="utf-8")
+        return project
+
+    def test_named_template_resolves_to_the_library_file(self, tmp_path: Path) -> None:
+        project = self._project(
+            tmp_path,
+            'version: "0.1"\nname: p\npipeline: explainer_article\n',
+        )
+        proj = resolve_project(
+            project, None, library_path=self.LIBRARY, home=tmp_path / "home"
+        )
+        assert proj.pipeline_name == "explainer_article"
+        assert proj.pipeline_path == self.LIBRARY / "templates" / "explainer_article.yaml"
+
+    def test_no_copy_is_needed_in_the_project(self, tmp_path: Path) -> None:
+        """The point of the feature: the project is a brief and a name, nothing else."""
+        project = self._project(
+            tmp_path,
+            'version: "0.1"\nname: p\npipeline: explainer_article\n',
+        )
+        assert not (project / "pipelines").exists()
+        resolve_project(project, None, library_path=self.LIBRARY, home=tmp_path / "home")
+
+    def test_both_a_template_and_local_files_is_refused(self, tmp_path: Path) -> None:
+        """Not resolved by precedence: which is meant is what the author must say."""
+        project = self._project(
+            tmp_path,
+            'version: "0.1"\nname: p\npipeline: explainer_article\n',
+        )
+        (project / "pipelines").mkdir()
+        (project / "pipelines" / "mine.yaml").write_text("x", encoding="utf-8")
+        with pytest.raises(UsageError, match="not both"):
+            resolve_project(
+                project, None, library_path=self.LIBRARY, home=tmp_path / "home"
+            )
+
+    def test_unknown_template_names_what_exists(self, tmp_path: Path) -> None:
+        project = self._project(tmp_path, 'version: "0.1"\nname: p\npipeline: nosuch\n')
+        with pytest.raises(UsageError, match="explainer_article"):
+            resolve_project(
+                project, None, library_path=self.LIBRARY, home=tmp_path / "home"
+            )
+
+    def test_pipeline_flag_contradicting_the_reference_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        project = self._project(
+            tmp_path,
+            'version: "0.1"\nname: p\npipeline: explainer_article\n',
+        )
+        with pytest.raises(UsageError, match="contradicts"):
+            resolve_project(
+                project, "research", library_path=self.LIBRARY, home=tmp_path / "home"
+            )
+
+    def test_neither_a_template_nor_a_local_pipeline_says_both_ways(
+        self, tmp_path: Path
+    ) -> None:
+        project = self._project(tmp_path, 'version: "0.1"\nname: p\n')
+        with pytest.raises(UsageError, match="templates"):
+            resolve_project(
+                project, None, library_path=self.LIBRARY, home=tmp_path / "home"
+            )
+
+    def test_a_local_pipeline_still_works(self, tmp_path: Path) -> None:
+        """A project that genuinely forks keeps its own file, as before."""
+        project = self._project(tmp_path, 'version: "0.1"\nname: p\n')
+        (project / "pipelines").mkdir()
+        shutil.copy(
+            self.LIBRARY / "templates" / "explainer_article.yaml",
+            project / "pipelines" / "mine.yaml",
+        )
+        proj = resolve_project(
+            project, None, library_path=self.LIBRARY, home=tmp_path / "home"
+        )
+        assert proj.pipeline_name == "mine"
+
+
 # --- 4. run: happy path --------------------------------------------------------
 
 
