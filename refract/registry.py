@@ -572,10 +572,22 @@ class ResolvedType:
         return apply_rules(self.rules, text, base_dir)
 
     def validate_json(self, data: object) -> list[str]:
-        """Return JSON-schema error messages; empty means valid (SPEC §10.2 gate)."""
+        """Return JSON-schema error messages; empty means valid (SPEC §10.2 gate).
+
+        Each message is prefixed with WHERE it failed. Without the path a live gate
+        retry handed the agent five identical lines — ``None is not of type 'string'``
+        five times over a note with a dozen nested lists — and the only way to act on
+        that is to re-read the whole schema and guess. These messages are the retry's
+        feedback (§10.2), so an unlocated one costs a second call for nothing: that one
+        step took two calls and $0.61 of them was the first attempt.
+        """
         if self._validator is None:
             return []
-        return [e.message for e in self._validator.iter_errors(data)]
+        out: list[str] = []
+        for e in self._validator.iter_errors(data):
+            where = "/".join(str(p) for p in e.absolute_path)
+            out.append(f"{where}: {e.message}" if where else e.message)
+        return out
 
 
 # --- registry --------------------------------------------------------------

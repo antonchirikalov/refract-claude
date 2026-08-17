@@ -379,6 +379,26 @@ types:
         assert t.validate_json({"verdict": "maybe"}) != []
         assert t.validate_json({}) != []
 
+    def test_schema_errors_say_where_they_failed(self) -> None:
+        """These messages ARE the gate-retry feedback (SPEC §10.2).
+
+        A live retry was handed five identical `None is not of type 'string'` lines over
+        a note with a dozen nested lists; the only way to act on that is to re-read the
+        schema and guess, and the first attempt was paid for regardless.
+        """
+        registry = ArtifactRegistry.builtins_only()
+        t = registry.get("verdict@v1")
+        assert t is not None
+        problems = t.validate_json({"verdict": "revise", "issues": [{"note": 42}]})
+        assert problems == ["issues/0/note: 42 is not of type 'string'"]
+
+    def test_a_top_level_error_needs_no_path(self) -> None:
+        registry = ArtifactRegistry.builtins_only()
+        t = registry.get("verdict@v1")
+        assert t is not None
+        problems = t.validate_json({})
+        assert problems and not problems[0].startswith(":")
+
     def test_selection_schema(self) -> None:
         registry = ArtifactRegistry.builtins_only()
         t = registry.get("selection@v1")
