@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 560" width="1240" height="560"
+     role="img" aria-label="Форма раунда правки: писатель с гейтом, два корректора, критик">
+  <style>
+    .bg   { fill: #fbfaf7; }
+    .card { fill: #ffffff; stroke: #cfcbc2; stroke-width: 2; }
+    .gate { fill: #fdf6e6; stroke: #d9b45e; stroke-width: 2; }
+    .crit { fill: #f3f1fb; stroke: #9a92c9; stroke-width: 2; }
+    .h    { font: 600 26px "Segoe UI", system-ui, "DejaVu Sans", sans-serif; fill: #1f1e1b; }
+    .role { font: 600 19px "Segoe UI", system-ui, "DejaVu Sans", sans-serif; fill: #1f1e1b; }
+    .sub  { font: 15px "Segoe UI", system-ui, "DejaVu Sans", sans-serif; fill: #5f5b53; }
+    .note { font: 14px "Segoe UI", system-ui, "DejaVu Sans", sans-serif; fill: #6b6257; }
+    .tag  { font: 13px ui-monospace, Consolas, monospace; fill: #6b6257; }
+    .flow { stroke: #6f6a61; stroke-width: 2.5; fill: none; marker-end: url(#a); }
+    .back { stroke: #8c7ab5; stroke-width: 2.5; fill: none; stroke-dasharray: 7 5;
+            marker-end: url(#p); }
+    .self { stroke: #c39b3a; stroke-width: 2.5; fill: none; marker-end: url(#g); }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+            orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6f6a61"/></marker>
+    <marker id="p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+            orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8c7ab5"/></marker>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+            orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c39b3a"/></marker>
+  </defs>
+
+  <rect class="bg" width="1240" height="560"/>
+  <text class="h" x="40" y="50">Один раунд правки</text>
+  <text class="note" x="40" y="78">Правит тот, кто может. Сообщает только тот, кто иначе не может, — и это стоит раунда.</text>
+
+  <!-- 1. writer -->
+  <rect class="card" x="60" y="116" width="240" height="104" rx="10"/>
+  <text class="role" x="82" y="150">Писатель</text>
+  <text class="sub"  x="82" y="176">пишет и считает</text>
+  <text class="sub"  x="82" y="198">пример руками</text>
+
+  <!-- 2. verifier -->
+  <rect class="card" x="360" y="116" width="240" height="104" rx="10"/>
+  <text class="role" x="382" y="150">Верификатор</text>
+  <text class="sub"  x="382" y="176">пересчитывает</text>
+  <text class="sub"  x="382" y="198">арифметику питоном</text>
+  <text class="note" x="382" y="246">правит на месте,</text>
+  <text class="note" x="382" y="268">раунда не тратит</text>
+
+  <!-- 3. fact checker -->
+  <rect class="card" x="660" y="116" width="240" height="104" rx="10"/>
+  <text class="role" x="682" y="150">Сверщик</text>
+  <text class="sub"  x="682" y="176">открывает заметки</text>
+  <text class="sub"  x="682" y="198">и правит атрибуции</text>
+  <text class="note" x="682" y="246">правит на месте,</text>
+  <text class="note" x="682" y="268">раунда не тратит</text>
+
+  <!-- 4. critic -->
+  <rect class="crit" x="960" y="116" width="220" height="104" rx="10"/>
+  <text class="role" x="982" y="150">Критик</text>
+  <text class="sub"  x="982" y="176">судит механизм,</text>
+  <text class="sub"  x="982" y="198">а не прозу</text>
+  <text class="note" x="982" y="246">только сообщает —</text>
+  <text class="note" x="982" y="268">и это стоит раунда</text>
+
+  <path class="flow" d="M 302 168 H 354"/>
+  <path class="flow" d="M 602 168 H 654"/>
+  <path class="flow" d="M 902 168 H 954"/>
+
+  <!-- gate under the writer, with a short loop back into it -->
+  <rect class="gate" x="60" y="300" width="240" height="146" rx="10"/>
+  <text class="role" x="82" y="332">Гейт</text>
+  <text class="tag"  x="82" y="358">prose_chars 8000-12000</text>
+  <text class="tag"  x="82" y="380">no_empty_sections</text>
+  <text class="tag"  x="82" y="402">forbid_file ru-slop.txt</text>
+  <text class="note" x="82" y="430">снять не менее N знаков</text>
+  <path class="self" d="M 316 372 C 350 372 350 240 306 224"/>
+  <text class="note" x="322" y="300">повтор шага</text>
+  <text class="note" x="322" y="322">с арифметикой</text>
+
+  <!-- verdict back to the first element only, along the bottom, left of the gate -->
+  <path class="back" d="M 1070 224 V 512 H 30 V 176 H 54"/>
+  <text class="note" x="470" y="504">вердикт «на доработку» — только первому звену: оно переписывает</text>
+</svg>

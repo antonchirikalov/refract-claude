@@ -84,7 +84,16 @@ nodes:
 
   - id: write
     type: loop
-    params: { max_rounds: 3 }
+    # Four, not three, and the number comes from a measured run rather than taste. Three
+    # rounds went 6 -> 2 -> 2 open items and the critic approved none of them: the loop was
+    # still improving when the ceiling cut it off, and what shipped carried two remarks
+    # nobody closed. A ceiling that stops a converging loop is the wrong ceiling for the
+    # genre, and the plateau it is there to prevent is not what was happening.
+    #
+    # It stays a small number on purpose. This is not a budget to spend — `on_max_rounds:
+    # pass` still lets an unapproved draft through, and the honest fix for a loop that
+    # genuinely stalls is a plateau detector, not more rounds.
+    params: { max_rounds: 4 }
     body:
       # A CHAIN, not one agent, and the order inside it is the order of what cannot be
       # judged by reading. The writer states the mechanism and works the example. The
