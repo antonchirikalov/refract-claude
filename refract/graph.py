@@ -367,7 +367,7 @@ class _Validator:
                     pairs.append((local, ref_s))
         return pairs
 
-    def _check_data_ref(self, node_id: str, ref_s: str) -> None:
+    def _check_data_ref(self, node_id: str | None, ref_s: str) -> None:
         ref = parse_ref(ref_s)
         if not isinstance(ref, DataRef):
             return
@@ -404,6 +404,25 @@ class _Validator:
                     None,
                     f"checkpoint refers to unknown node {node_id!r}",
                 )
+
+    def _phase_outputs(self) -> None:
+        """``outputs`` must name real ports of this pipeline (SPEC §22).
+
+        Checked in the same phase as checkpoints and with the same codes as any other
+        data reference: a delivery naming a port that does not exist is a run that
+        finishes and hands over nothing, and finding that out after the run has been
+        paid for is the whole failure this validation exists to prevent.
+        """
+        for name, ref_s in self.pipeline.outputs.items():
+            ref = parse_ref(ref_s)
+            if not isinstance(ref, DataRef):
+                self.err(
+                    Code.E_BINDING_ILLEGAL,
+                    None,
+                    f"output {name!r}: {ref_s!r} is not a <node>.<port> reference",
+                )
+                continue
+            self._check_data_ref(None, ref_s)
 
     # -- Phase D: shape / §16 constraints --
 
@@ -1051,6 +1070,7 @@ class _Validator:
         self._phase_existence()
         self._phase_refs()
         self._phase_checkpoints()
+        self._phase_outputs()
         if self._refs_resolved():
             self._phase_shape()
             self._phase_edges()

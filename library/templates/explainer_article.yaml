@@ -18,6 +18,20 @@ input_mode: brief
 # findings file in place IS the acceptance mechanism (SPEC §21) — no separate UI.
 checkpoints: [style]
 
+# What the run delivers, assembled into `runs/<id>/output/` when it completes (SPEC §22).
+#
+# The NAMES matter and are not the port names. The article declares its pictures as
+# `![подпись](figures/<slug>.png)`, so the illustration directory has to arrive called
+# `figures` next to `article.md` or every link in the delivered markdown is broken. Only
+# the pipeline knows that promise — the illustrator's port is `illustration`, and the
+# engine has no business guessing which of the two the artifact meant.
+#
+# `restyle.article` rather than `write.article`: the deliverable is the text after the
+# accepted style edits, not the draft the loop handed over.
+outputs:
+  article: restyle.article
+  figures: figures.illustration
+
 nodes:
   - id: brief
     type: builtin/brief

@@ -14,10 +14,15 @@ import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from refract.models.types import ItemInfo, MinEntriesRule, Rule, TypeKind
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from refract.models.pipeline import Node
+
 from refract.registry import ResolvedType, apply_rules, measure_rules
 
 # --- the single linking helper (SPEC §10; Windows symlink fallback) --------
@@ -80,6 +85,38 @@ def link_or_copy(src: Path | str, dst: Path | str) -> None:
             f"  to:   {dst}\n"
             f"    ->  {long_path(dst)}"
         ) from exc
+
+
+# --- where a producer node's outputs live (SPEC §9/§10.3) -------------------
+
+
+def node_output_base(run_dir: Path | str, node: "Node") -> Path:
+    """Directory holding a producer node's port outputs (SPEC §9/§10.3).
+
+    Plain agent/builtin nodes write to ``steps/<id>/main/output/``; map, loop, select and
+    discover nodes have their outputs ASSEMBLED by the engine under ``steps/<id>/_out/``
+    (SPEC §10.3, §20.2).
+
+    One implementation, deliberately. It lived in the scheduler with a copy in
+    ``metanodes`` labelled "mirror of scheduler", and a third was about to appear in the
+    delivery assembly — three answers to "where did that port go" is two too many for a
+    question every input, every reuse and every deliverable asks.
+    """
+    from refract.models.pipeline import (
+        AgentNode,
+        DiscoverNode,
+        LoopNode,
+        SelectNode,
+    )
+
+    run_dir = Path(run_dir)
+    if isinstance(node, LoopNode | SelectNode | DiscoverNode):
+        return run_dir / "steps" / node.id / "_out"
+    if isinstance(node, AgentNode) and (
+        node.map is not None or node.map_over is not None
+    ):
+        return run_dir / "steps" / node.id / "_out"
+    return run_dir / "steps" / node.id / "main" / "output"
 
 
 # --- artifact naming (SPEC §10.4) ------------------------------------------

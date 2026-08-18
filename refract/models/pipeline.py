@@ -16,6 +16,9 @@ from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, field_val
 from refract.models.types import Rule
 
 _ID_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
+# An output name becomes a path segment under ``runs/<id>/output/``, so it must not
+# be able to traverse out of it or name something the filesystem will refuse.
+_OUTPUT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 class RetryParams(BaseModel):
@@ -261,4 +264,29 @@ class Pipeline(BaseModel):
     # Pipeline-level rather than a node param: checkpoints apply to every node kind,
     # whose params models differ, and one list is what a client renders.
     checkpoints: list[str] = Field(default_factory=list)
+    # What the RUN delivers, as ``{name: "<node>.<port>"}`` (SPEC §22). The name is the
+    # filename or directory the artifact takes inside ``runs/<id>/output/``.
+    #
+    # Declared rather than derived. "Terminal nodes" is the obvious rule and it is wrong
+    # for exactly the shape a document conveyor has: the explainer's article is consumed
+    # by the illustrator, so the graph calls it non-terminal while it is the deliverable,
+    # and the illustrator's directory alone would ship without the text. Declaring it also
+    # settles the LAYOUT, which nothing else can: an article carrying
+    # ``![](figures/<slug>.png)`` needs that directory called ``figures`` next to it, and
+    # only the pipeline knows the promise the artifact made.
+    #
+    # Empty means the run delivers nothing assembled, which is a fine answer for a
+    # pipeline whose result is a directory somebody reads in place.
+    outputs: dict[str, str] = Field(default_factory=dict)
     nodes: list[Node]
+
+    @field_validator("outputs")
+    @classmethod
+    def _output_names(cls, v: dict[str, str]) -> dict[str, str]:
+        for name in v:
+            if not _OUTPUT_NAME_RE.match(name):
+                raise ValueError(
+                    f"invalid output name {name!r}: it becomes a filename, so it has to "
+                    "be a plain name (letters, digits, dot, dash, underscore)"
+                )
+        return v

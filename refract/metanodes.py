@@ -19,12 +19,16 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from refract.artifacts import artifact_filename, artifact_path, link_or_copy
+from refract.artifacts import (
+    artifact_filename,
+    artifact_path,
+    link_or_copy,
+    node_output_base,
+)
 from refract.graph import BodyRef, DataRef, PrevRef, parse_ref
 from refract.models.agent import AgentSpec, Port
 from refract.models.ledger import NodeStatus, StepOutcome, StepState, StepStatus
 from refract.models.pipeline import (
-    AgentNode,
     BodyBlock,
     CriticBlock,
     LoopNode,
@@ -72,15 +76,8 @@ class MetaContext:
         return self.run_dir / "snapshot" / "agents" / ref
 
     def output_base(self, node_id: str) -> Path:
-        """Directory holding a producer node's port outputs (mirror of scheduler)."""
-        node = self.nodes[node_id]
-        if isinstance(node, LoopNode | SelectNode):
-            return self.run_dir / "steps" / node_id / "_out"
-        if isinstance(node, AgentNode) and (
-            node.map is not None or node.map_over is not None
-        ):
-            return self.run_dir / "steps" / node_id / "_out"
-        return self.run_dir / "steps" / node_id / "main" / "output"
+        """Directory holding a producer node's port outputs (SPEC §9/§10.3)."""
+        return node_output_base(self.run_dir, self.nodes[node_id])
 
 
 def _primary(agent: AgentSpec) -> Port:

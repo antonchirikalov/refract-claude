@@ -26,10 +26,16 @@ import typer
 import yaml
 
 from refract.events import EventWriter, utcnow_iso
+from refract.deliver import deliver
 from refract.explain import as_dict as explain_as_dict
 from refract.explain import diagnose
 from refract.explain import render as render_explain
-from refract.graph import ValidationContext, load_agents, load_pipeline
+from refract.graph import (
+    ValidationContext,
+    load_agents,
+    load_pipeline,
+    parse_pipeline_file,
+)
 from refract.models.agent import AgentSpec, tier_at_least
 from refract.models.config import McpFile, ProjectConfig, ProvidersFile
 from refract.models.ledger import (
@@ -911,6 +917,62 @@ def _archive_step_dir(step_dir: Path) -> None:
 # --- status ------------------------------------------------------------------
 
 
+def _project_pipeline_outputs(run_dir: Path) -> dict[str, str]:
+    """``outputs`` from the project's CURRENT pipeline, or empty if unavailable.
+
+    ``runs/<id>`` sits two levels under the project, which is how the rest of the CLI
+    recovers a project from a run directory too.
+    """
+    project_dir = Path(run_dir).resolve().parents[1]
+    try:
+        proj = resolve_project(project_dir, None, library_path=None)
+    except Exception:
+        try:
+            app = load_app_config()
+            proj = resolve_project(project_dir, None, library_path=app.library_path)
+        except Exception:
+            return {}
+    pipeline, errors = parse_pipeline_file(proj.pipeline_path)
+    if pipeline is None or errors:
+        return {}
+    return dict(pipeline.outputs)
+
+
+def deliver_impl(run_dir: Path | str, *, app: AppConfig) -> int:
+    """Assemble a run's declared deliverables into ``runs/<id>/output/`` (SPEC §22).
+
+    A completed run does this itself; the command exists for the cases where that is not
+    enough — a run finished before the pipeline declared its outputs, or a delivery a
+    person wants rebuilt after inspecting the step tree. It reports a missing artifact
+    rather than assembling a folder that looks complete without being it.
+    """
+    run_dir = Path(run_dir)
+    pipeline, agents = _load_snapshot(run_dir, library_path=app.library_path)
+    registry = ArtifactRegistry.load(app.library_path)
+    if not pipeline.outputs:
+        # The snapshot is the authority on what RAN, and `outputs` is not about what ran
+        # — it is about how the result is presented. So a run finished before the pipeline
+        # declared its outputs can still be assembled from the project's current
+        # declaration, and the substitution is announced rather than done quietly.
+        current = _project_pipeline_outputs(run_dir)
+        if current:
+            typer.echo(
+                f"the snapshot of this run declares no outputs; using the project's "
+                f"current declaration ({', '.join(sorted(current))})"
+            )
+            pipeline = pipeline.model_copy(update={"outputs": current})
+        else:
+            typer.echo(
+                f"pipeline {pipeline.name!r} declares no outputs: nothing to deliver"
+            )
+            return EXIT_OK
+    report = deliver(run_dir, pipeline=pipeline, registry=registry, agents=agents)
+    for line in report.render():
+        typer.echo(f"  {line}")
+    typer.echo(f"delivered to {report.output_dir}")
+    return EXIT_OK if report.ok else EXIT_RUN_FAILED
+
+
 def status_impl(run_dir: Path | str) -> int:
     typer.echo(render_status(run_dir))
     return EXIT_OK
@@ -1233,6 +1295,14 @@ def rerun(
         return EXIT_OK if status_ is RunStatus.completed else EXIT_RUN_FAILED
 
     _run_cli(body)
+
+
+@app.command(name="deliver")
+def deliver_cmd(
+    run_dir: Path = typer.Argument(..., help="run directory"),
+) -> None:
+    """Assemble the run's declared outputs into runs/<id>/output/."""
+    _run_cli(lambda: deliver_impl(run_dir, app=load_app_config()))
 
 
 @app.command()

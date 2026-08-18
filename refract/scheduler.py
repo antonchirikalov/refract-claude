@@ -21,8 +21,14 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from refract.artifacts import artifact_path, link_or_copy, long_path
+from refract.artifacts import (
+    artifact_path,
+    link_or_copy,
+    long_path,
+    node_output_base,
+)
 from refract.builtins import BUILTINS
+from refract.deliver import deliver
 from refract.builtins.scanner import source_hash as source_content_hash
 from refract.events import EventWriter, utcnow_iso
 from refract.graph import DISCOVER_OUT_PORT, BindingRef, DataRef, parse_ref
@@ -121,22 +127,6 @@ def node_dependencies(pipeline: Pipeline) -> dict[str, set[str]]:
 # --- input resolution (SPEC §10.1/§10.4) ------------------------------------
 
 
-def _node_output_base(run_dir: Path, node: Node) -> Path:
-    """Directory that holds a producer node's port outputs (SPEC §9/§10.3).
-
-    Plain agent/builtin nodes write to ``steps/<id>/main/output/``; map, loop,
-    select and discover nodes assemble their outputs under ``steps/<id>/_out/``
-    (SPEC §10.3, §20.2).
-    """
-    if isinstance(node, LoopNode | SelectNode | DiscoverNode):
-        return run_dir / "steps" / node.id / "_out"
-    if isinstance(node, AgentNode) and (
-        node.map is not None or node.map_over is not None
-    ):
-        return run_dir / "steps" / node.id / "_out"
-    return run_dir / "steps" / node.id / "main" / "output"
-
-
 def resolve_data_inputs(
     agent: AgentSpec,
     inputs: dict[str, str],
@@ -157,7 +147,7 @@ def resolve_data_inputs(
         ref = parse_ref(ref_s)
         if not isinstance(ref, DataRef):
             raise NotImplementedError(f"unsupported input ref {ref_s!r} on {where}")
-        producer_out = _node_output_base(run_dir, nodes[ref.node_id])
+        producer_out = node_output_base(run_dir, nodes[ref.node_id])
         ptype = consume_type[port]
         if ptype.startswith("collection<"):
             # a plain agent may consume a whole collection (I6 forbids producing
@@ -399,7 +389,7 @@ def _map_binding(
         raise KeyError(f"unknown produce type {primary[0].type!r} on {node.id}")
     return _MapBinding(
         mapped_port=mapped[0].port,
-        input_dir=_node_output_base(run_dir, nodes[ref.node_id]) / ref.port,
+        input_dir=node_output_base(run_dir, nodes[ref.node_id]) / ref.port,
         out_port=primary[0].port,
         out_rtype=out_rtype,
         out_collection_type=make_collection(primary[0].type),
@@ -1261,7 +1251,7 @@ async def run_pipeline(
         """Record the checkpoint and stop scheduling new nodes (SPEC §21.2)."""
         nonlocal parked
         parked = node_id
-        outputs = _node_output_base(run_dir, nodes[node_id])
+        outputs = node_output_base(run_dir, nodes[node_id])
         listing = (
             sorted(str(p.relative_to(run_dir)) for p in outputs.iterdir())
             if outputs.is_dir()
@@ -1393,6 +1383,23 @@ async def run_pipeline(
     if status is RunStatus.cancelled and rejected is not None:
         ledger.state.awaiting_checkpoint = None
         ledger.save()
+    # Deliver what the pipeline says it delivers (SPEC §22). Only on a completed run:
+    # a folder assembled from a failed one reads as a result, and the whole point of
+    # having one place to look is that what is in it can be trusted. Every outcome is
+    # logged, including a delivery that could not find an artifact, because a delivery
+    # folder holding three of four things looks exactly like a complete one.
+    if status is RunStatus.completed and pipeline.outputs:
+        report = deliver(run_dir, pipeline=pipeline, registry=registry, agents=agents)
+        for line in report.render():
+            events.emit(
+                {
+                    "type": "log",
+                    "payload": {
+                        "level": "info" if report.ok else "warning",
+                        "message": f"deliver: {line}",
+                    },
+                }
+            )
     ledger.set_run_status(
         status, finished_at=None if status is RunStatus.waiting_human else clock()
     )
