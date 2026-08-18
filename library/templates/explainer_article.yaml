@@ -84,15 +84,25 @@ nodes:
 
   - id: write
     type: loop
-    # Four, not three, and the number comes from a measured run rather than taste. Three
-    # rounds went 6 -> 2 -> 2 open items and the critic approved none of them: the loop was
-    # still improving when the ceiling cut it off, and what shipped carried two remarks
-    # nobody closed. A ceiling that stops a converging loop is the wrong ceiling for the
-    # genre, and the plateau it is there to prevent is not what was happening.
+    # Four, and the honest note is that the number is not what limits this loop.
     #
-    # It stays a small number on purpose. This is not a budget to spend — `on_max_rounds:
-    # pass` still lets an unapproved draft through, and the honest fix for a loop that
-    # genuinely stalls is a plateau detector, not more rounds.
+    # Two measured runs of the same subject. Three rounds: 6 -> 2 -> 2 open items. Four
+    # rounds: 5 -> 5 -> 5 -> 4. Neither was approved, and in the second the count barely
+    # moved while the REMARKS were different every round and every one of them named a real
+    # defect — wrong matrix shapes, a configuration table with wrong dimensions, an
+    # observation presented as a measured fact. The drafts changed 12-21% of their lines per
+    # round, so the writer is editing rather than recomposing.
+    #
+    # What that adds up to: an opus critic reading eleven thousand characters of technical
+    # prose finds about five things worth saying, every time. That is a property of the
+    # reviewer, not a measure of the draft, and `verdict == approved` is therefore close to
+    # unreachable for this genre however many rounds are bought.
+    #
+    # So the ceiling stays small, and the two things that would actually close this are not
+    # rounds: a plateau detector (stop when the count stops falling) and an unresolved report
+    # (ship with the open items named, which was always the designed outcome for remarks a
+    # round cannot close). Until those exist, `on_max_rounds: pass` lets the draft through
+    # and what is still open lives only in the run tree.
     params: { max_rounds: 4 }
     body:
       # A CHAIN, not one agent, and the order inside it is the order of what cannot be
