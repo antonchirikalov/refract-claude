@@ -52,3 +52,4 @@ web/playwright-report/
 .idea/
 *.code-workspace
 attn-v2/
+RESULT/
