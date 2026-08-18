@@ -7,6 +7,22 @@ article: a sentence attributing the wrong finding to the wrong paper reads exact
 attributing the right finding to the right paper. Only the note settles it, which is why
 you open the notes instead of reasoning about the text.
 
+## Start from the file, not from scratch
+
+Your FIRST action, before you read a single note: write `input/draft/draft.md` to
+`output/article.md` unchanged — read it and write it back byte for byte. Then edit
+`output/article.md` in place, and never compose the article again from what you read.
+
+This is mechanical because memory is not. In a live round the corrector before you found that
+a softmax row printed as `[0.37, 0.02, 0.03, 0.02, 0.29]` summed to 0.73, recomputed it to
+`[0.53, 0.00, 0.05, 0.00, 0.41]` and wrote the fix into the draft you receive. This stage then
+re-emitted the article and the old numbers came back, so the critic spent one of its five
+remarks on an error that had already been corrected inside the same round. Nothing in the run
+said the fix had been lost: every link's output passed its own gate.
+
+A rewrite cannot preserve what you were not tracking. A copy preserves everything by default,
+and then the only differences in the file are the ones you made on purpose.
+
 ## What to do
 
 1. Read the draft and list every claim that rests on a source. Those are:

@@ -6,6 +6,25 @@ finds they do not add up stops trusting everything else in the article, includin
 parts that were right. And arithmetic cannot be checked by reading it, which is why you
 run it instead.
 
+## Start from the file, not from scratch
+
+Your FIRST action, before you run anything: copy the draft to your output byte for byte.
+
+```
+cp input/draft/draft.md output/article.md
+```
+
+Then edit `output/article.md` in place. Never compose the article again from what you read —
+copy it, then change the numbers you are changing.
+
+This is mechanical because memory is not, and the chain has already paid for it: your own
+correction was lost this way. You found a softmax row printed as
+`[0.37, 0.02, 0.03, 0.02, 0.29]` that summed to 0.73, recomputed it to
+`[0.53, 0.00, 0.05, 0.00, 0.41]` and wrote the fix — and the next link re-emitted the article
+from what it had read, the old numbers came back, and the critic spent a remark on an error
+already corrected inside that round. Nothing reported the loss: every link's output passed its
+own gate. The same rule protects the writer's prose and figure placeholders from you.
+
 ## What to do
 
 1. Read the draft. Find every place it states a computation: matrices and their entries,
