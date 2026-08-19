@@ -232,3 +232,87 @@ def test_a_completed_run_delivers_without_being_asked(
     delivered = run_dir / "output" / "requirements"
     assert delivered.is_dir(), sorted((run_dir / "output").iterdir())
     assert (delivered / "_collection.json").exists()
+
+
+# --- existence is not enough (SPEC §22) --------------------------------------
+
+
+def test_an_empty_directory_is_missing_not_delivered(tmp_path: Path) -> None:
+    """Caught on a live run: an empty `figures` directory was reported as delivered.
+
+    The gate already knows existence is not enough — a `dir` artifact is gated on having
+    real content, because an agent that produced nothing still leaves a directory behind.
+    Delivery checked existence alone, which is this module's own stated failure mode one
+    level down: a folder holding three of four things looks exactly like a complete one.
+    """
+    library = REPO_ROOT / "library"
+    registry = ArtifactRegistry.load(library)
+    run_dir = tmp_path / "run"
+    (run_dir / "steps" / "figures" / "main" / "output" / "illustration").mkdir(parents=True)
+
+    agents = {
+        "illustrator@1": agent_spec(
+            "illustrator",
+            consumes=[{"port": "article", "type": "article@v1"}],
+            produces=[{"port": "illustration", "type": "illustration@v1"}],
+        )
+    }
+    pipeline = Pipeline.model_validate(
+        {
+            "version": "0.1",
+            "name": "p",
+            "outputs": {"figures": "figures.illustration"},
+            "nodes": [
+                {"id": "figures", "type": "agent", "agent": "illustrator@1", "inputs": {}}
+            ],
+        }
+    )
+    report = deliver(run_dir, pipeline=pipeline, registry=registry, agents=agents)
+    assert not report.ok
+    assert "empty directory" in report.missing["figures"]
+    assert not (run_dir / "output" / "figures").exists()
+
+
+def test_a_dot_entry_alone_is_still_empty(tmp_path: Path) -> None:
+    """Same rule as the gate: dot-entries are tooling, not content."""
+    library = REPO_ROOT / "library"
+    registry = ArtifactRegistry.load(library)
+    run_dir = tmp_path / "run"
+    d = run_dir / "steps" / "figures" / "main" / "output" / "illustration"
+    d.mkdir(parents=True)
+    (d / ".keep").write_text("", encoding="utf-8")
+
+    agents = {
+        "illustrator@1": agent_spec(
+            "illustrator",
+            consumes=[{"port": "article", "type": "article@v1"}],
+            produces=[{"port": "illustration", "type": "illustration@v1"}],
+        )
+    }
+    pipeline = Pipeline.model_validate(
+        {
+            "version": "0.1",
+            "name": "p",
+            "outputs": {"figures": "figures.illustration"},
+            "nodes": [
+                {"id": "figures", "type": "agent", "agent": "illustrator@1", "inputs": {}}
+            ],
+        }
+    )
+    assert "empty directory" in deliver(
+        run_dir, pipeline=pipeline, registry=registry, agents=agents
+    ).missing["figures"]
+
+
+def test_an_empty_file_is_missing_too(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    out = run_dir / "steps" / "write" / "main" / "output"
+    out.mkdir(parents=True)
+    (out / "doc.md").write_text("", encoding="utf-8")
+    report = deliver(
+        run_dir,
+        pipeline=_pipeline({"requirements": "write.doc"}),
+        registry=write_registry(tmp_path),
+        agents=_agents(),
+    )
+    assert "empty file" in report.missing["requirements"]

@@ -56,6 +56,27 @@ class DeliveryReport:
         return lines
 
 
+def _unusable(src: Path) -> str | None:
+    """Why this artifact cannot be delivered, or ``None`` if it can.
+
+    Existence is not enough, and the gate already knows it: a ``dir`` artifact is gated on
+    having real content, because an agent that produced nothing still leaves a directory.
+    Delivery checked existence alone and so reported an EMPTY figures directory as
+    delivered — the exact failure this module's docstring says it exists to prevent, one
+    level down. Same rule as the gate: dot-entries are tooling, not content.
+    """
+    if not src.exists():
+        return "was not produced"
+    if src.is_dir():
+        content = [c for c in src.iterdir() if not c.name.startswith(".")]
+        if not content:
+            return "produced an empty directory"
+        return None
+    if src.stat().st_size == 0:
+        return "produced an empty file"
+    return None
+
+
 def _port_types(
     pipeline: Pipeline, registry: ArtifactRegistry, agents: dict[str, AgentSpec]
 ) -> dict[str, dict[str, str]]:
@@ -129,8 +150,9 @@ def deliver(
             report.missing[name] = f"unknown node {ref.node_id!r}"
             continue
         src, is_dir = found
-        if not src.exists():
-            report.missing[name] = f"{ref_s} was not produced ({src})"
+        why = _unusable(src)
+        if why is not None:
+            report.missing[name] = f"{ref_s} {why} ({src})"
             continue
         # the pipeline's name, plus the artifact's own extension for a file: an article
         # delivered as `article` with no suffix is a file nothing will open as markdown
