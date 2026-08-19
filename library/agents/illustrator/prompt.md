@@ -22,6 +22,24 @@ you would have drawn — you brief the tool well and let it work.
    Take the labels from the article itself. If the text calls a matrix `Q`, the figure
    says `Q`; a figure that renames things the reader just learned is worse than no figure.
 
+   And name the LANGUAGE of every word that will appear in the picture, not only the data
+   labels. A chart has furniture — title, axis names, legend, units, the caption strip —
+   and the tool writes that furniture in whatever language your brief is written in. So
+   state it: "all text in the figure is in <the article's language>", then give the title
+   and the axis names in that language, spelled out, the way you already give the row and
+   column labels.
+
+   Measured on a live run: the brief pinned the four Russian token names as the row labels
+   and the picture got them exactly right — while the title came out "Raw attention scores",
+   the axes "Key token (being looked at)" and "Query token (looking)", in an article
+   written in Russian. Nothing in the brief was wrong; the furniture was simply never
+   mentioned, so it inherited the brief's own language.
+
+   Nothing downstream will catch this for you. The tool's own vision critic prints
+   "Critic satisfied" even when it could not read the rendered image at all — seen live,
+   right after it logged that it had no permission to open the file. Treat the brief as the
+   only line of defence, because it is.
+
 3. Before the first run, check the tool is reachable and configured.
 
    Resolve the executable in this order, and stop at the first step that answers:
