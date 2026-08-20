@@ -316,3 +316,58 @@ def test_an_empty_file_is_missing_too(tmp_path: Path) -> None:
         agents=_agents(),
     )
     assert "empty file" in report.missing["requirements"]
+
+
+# --- the engine's own record of what a loop left open (SPEC §22) -------------
+
+
+def _with_unresolved(run_dir: Path, node: str, text: str) -> None:
+    d = run_dir / "steps" / node / "_out"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "unresolved.md").write_text(text, encoding="utf-8")
+
+
+def test_the_unresolved_report_travels_with_the_deliverable(tmp_path: Path) -> None:
+    """Two live runs shipped articles carrying real unaddressed remarks whose only
+    trace was one warning line in the event log."""
+    run_dir = _run_with_output(tmp_path)
+    _with_unresolved(run_dir, "refine", "# Незакрытое\n\n1. форма матриц неверна\n")
+    report = deliver(
+        run_dir,
+        pipeline=_pipeline({"requirements": "write.doc"}),
+        registry=write_registry(tmp_path),
+        agents=_agents(),
+    )
+    assert report.ok
+    text = (run_dir / "output" / "unresolved.md").read_text("utf-8")
+    assert "форма матриц неверна" in text
+    assert report.delivered["unresolved"] == "output/unresolved.md"
+
+
+def test_two_loops_keep_their_findings_apart(tmp_path: Path) -> None:
+    """Merging two nodes' findings loses which stage said what."""
+    run_dir = _run_with_output(tmp_path)
+    _with_unresolved(run_dir, "refine", "# A\n\n1. первое\n")
+    _with_unresolved(run_dir, "sd_refine", "# B\n\n1. второе\n")
+    report = deliver(
+        run_dir,
+        pipeline=_pipeline({"requirements": "write.doc"}),
+        registry=write_registry(tmp_path),
+        agents=_agents(),
+    )
+    out = run_dir / "output" / "unresolved"
+    assert (out / "refine.md").read_text("utf-8").endswith("первое\n")
+    assert (out / "sd_refine.md").read_text("utf-8").endswith("второе\n")
+    assert "(2)" in report.delivered["unresolved"]
+
+
+def test_nothing_open_means_no_report_in_the_delivery(tmp_path: Path) -> None:
+    run_dir = _run_with_output(tmp_path)
+    report = deliver(
+        run_dir,
+        pipeline=_pipeline({"requirements": "write.doc"}),
+        registry=write_registry(tmp_path),
+        agents=_agents(),
+    )
+    assert "unresolved" not in report.delivered
+    assert not (run_dir / "output" / "unresolved.md").exists()

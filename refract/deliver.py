@@ -56,6 +56,34 @@ class DeliveryReport:
         return lines
 
 
+UNRESOLVED_FILENAME = "unresolved.md"
+
+
+def _deliver_unresolved(run_dir: Path, out_dir: Path, report: DeliveryReport) -> None:
+    """Carry every loop's open-items report into the delivery (SPEC §22).
+
+    Not declared in ``outputs`` and deliberately so: this is the ENGINE's record of what a
+    loop could not close, written from the typed verdict, not an artifact any agent
+    produced. It travels with the deliverable because that is the only place a person
+    looks — two live runs shipped articles carrying real, unaddressed remarks whose only
+    trace was one warning line in the event log.
+
+    One loop delivers ``unresolved.md``; several deliver ``unresolved/<node>.md``, because
+    silently merging two nodes' findings into one file loses which stage said what.
+    """
+    found = sorted(run_dir.glob(f"steps/*/_out/{UNRESOLVED_FILENAME}"))
+    if not found:
+        return
+    if len(found) == 1:
+        link_or_copy(found[0], out_dir / UNRESOLVED_FILENAME)
+        report.delivered["unresolved"] = f"{OUTPUT_DIRNAME}/{UNRESOLVED_FILENAME}"
+        return
+    for src in found:
+        node_id = src.parent.parent.name
+        link_or_copy(src, out_dir / "unresolved" / f"{node_id}.md")
+    report.delivered["unresolved"] = f"{OUTPUT_DIRNAME}/unresolved/ ({len(found)})"
+
+
 def _unusable(src: Path) -> str | None:
     """Why this artifact cannot be delivered, or ``None`` if it can.
 
@@ -139,6 +167,8 @@ def deliver(
     if out_dir.exists():
         shutil.rmtree(long_path(out_dir))
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    _deliver_unresolved(run_dir, out_dir, report)
 
     for name, ref_s in pipeline.outputs.items():
         ref = parse_ref(ref_s)

@@ -234,6 +234,16 @@ async def run_loop(node: LoopNode, ctx: MetaContext) -> NodeStatus:
         _warn(ctx, node.id, f"max_rounds ({node.params.max_rounds}) reached; passing")
 
     _assemble_loop_output(ctx, node, last_agent, chosen)
+    open_items = _write_unresolved(
+        ctx, node, critic_agent, chosen=chosen, approved=approved_round is not None
+    )
+    if open_items:
+        _warn(
+            ctx,
+            node.id,
+            f"{open_items} open item(s) from round {chosen}: "
+            f"steps/{node.id}/_out/unresolved.md",
+        )
     ctx.set_node(node.id, NodeStatus.done)
     return NodeStatus.done
 
@@ -390,10 +400,10 @@ def _revision(
     return aux, revision
 
 
-def _read_verdict(
+def _verdict_data(
     ctx: MetaContext, node: LoopNode, critic_agent: AgentSpec, r: int
-) -> str:
-    """Read the round's verdict from the critic's typed artifact (I4)."""
+) -> dict[str, object]:
+    """The round's verdict artifact, parsed (I4: control comes from this file alone)."""
     vrtype = ctx.registry.get(_VERDICT_TYPE)
     assert vrtype is not None
     path = artifact_path(
@@ -401,7 +411,65 @@ def _read_verdict(
         _primary(critic_agent).port,
         vrtype,
     )
-    return str(json.loads(path.read_text("utf-8")).get("verdict"))
+    data = json.loads(path.read_text("utf-8"))
+    return data if isinstance(data, dict) else {}
+
+
+def _read_verdict(
+    ctx: MetaContext, node: LoopNode, critic_agent: AgentSpec, r: int
+) -> str:
+    """Read the round's verdict from the critic's typed artifact (I4)."""
+    return str(_verdict_data(ctx, node, critic_agent, r).get("verdict"))
+
+
+def _write_unresolved(
+    ctx: MetaContext,
+    node: LoopNode,
+    critic_agent: AgentSpec,
+    *,
+    chosen: int,
+    approved: bool,
+) -> int:
+    """Write ``steps/<id>/_out/unresolved.md``; returns how many items it names (§10.3).
+
+    What a loop leaves open was the one thing a run never said out loud. A loop that hits
+    its ceiling warns "max_rounds reached; passing" and hands the draft on, and everything
+    the critic still objected to lives in `steps/<id>/critic_r<n>/output/verdict.json` —
+    a path nobody opens who is not already debugging. Measured across two live runs of the
+    same article: neither was ever approved, and the remarks that shipped with it were
+    real (wrong matrix shapes, a configuration table with wrong dimensions), yet the only
+    trace was a warning line in the event log.
+
+    Written by the ENGINE from the typed verdict, not by an agent: it is a transcription of
+    a file the engine already has, and putting a model in that path would add a way for the
+    record to disagree with what was actually judged.
+
+    A round the critic approved with remarks still gets the file: "publishable, but this is
+    wrong" is a finding, and silence about it reads as approval of everything.
+    """
+    data = _verdict_data(ctx, node, critic_agent, chosen)
+    issues = data.get("issues")
+    items = [i for i in issues if isinstance(i, dict)] if isinstance(issues, list) else []
+    if not items:
+        return 0
+    out_dir = ctx.run_dir / "steps" / node.id / "_out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    head = (
+        f"# Незакрытое: {node.id}, круг {chosen} из {node.params.max_rounds}\n\n"
+        + (
+            "Критик одобрил черновик и всё же назвал это.\n\n"
+            if approved
+            else "Круги правки исчерпаны, эти замечания остались открытыми.\n\n"
+        )
+    )
+    lines = []
+    for n, item in enumerate(items, 1):
+        section = str(item.get("section") or "").strip()
+        note = str(item.get("note") or "").strip()
+        lines.append(f"{n}. " + (f"[{section}] {note}" if section else note))
+    body = head + "\n\n".join(lines) + "\n"
+    (out_dir / "unresolved.md").write_text(body, "utf-8")
+    return len(items)
 
 
 def _assemble_loop_output(

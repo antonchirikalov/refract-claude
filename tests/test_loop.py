@@ -697,3 +697,164 @@ def test_block_params_still_apply(tmp_path: Path) -> None:
     assert status is RunStatus.failed
     # one attempt, not six: the block's gate_retries=0 beat the loop's 5
     assert ledger.state.steps["refine.body:r1"].tries == 1
+
+
+# --- what the loop leaves open (SPEC §10.3) ---------------------------------
+#
+# A loop that hits its ceiling warned "max_rounds reached; passing" and handed the draft on,
+# and everything the critic still objected to lived in `critic_r<n>/output/verdict.json` — a
+# path nobody opens who is not already debugging. Measured across two live runs of one
+# article: neither was ever approved, the remarks that shipped were real, and the only trace
+# was one warning line in the event log.
+
+
+def _verdict_with(v: str, issues: list[dict]) -> str:
+    return json.dumps({"verdict": v, "issues": issues})
+
+
+def _unresolved(run_dir: Path) -> Path:
+    return run_dir / "steps" / "refine" / "_out" / "unresolved.md"
+
+
+def test_open_items_are_written_when_rounds_run_out(tmp_path: Path) -> None:
+    _, agents, reg = _library(tmp_path)
+    status, ledger, run_dir = _run(
+        tmp_path,
+        _loop_pipeline(max_rounds=1, on_max_rounds="pass"),
+        agents,
+        reg,
+        {
+            "refine.body:r1": [ScriptedResponse(files={"doc.md": DOC1})],
+            "refine.critic:r1": [
+                ScriptedResponse(
+                    files={
+                        "verdict.json": _verdict_with(
+                            "revise",
+                            [
+                                {"section": "Многоголовость", "note": "формы неверны"},
+                                {"note": "термин без введения"},
+                            ],
+                        )
+                    }
+                )
+            ],
+        },
+    )
+    assert status is RunStatus.completed
+    assert ledger.state.nodes["refine"].status is NodeStatus.done
+    text = _unresolved(run_dir).read_text("utf-8")
+    assert "исчерпаны" in text
+    assert "1. [Многоголовость] формы неверны" in text
+    assert "2. термин без введения" in text
+
+
+def test_approved_with_remarks_still_reports_them(tmp_path: Path) -> None:
+    """"Publishable, but this is wrong" is a finding; silence reads as approval."""
+    _, agents, reg = _library(tmp_path)
+    _status, _ledger, run_dir = _run(
+        tmp_path,
+        _loop_pipeline(max_rounds=2, on_max_rounds="pass"),
+        agents,
+        reg,
+        {
+            "refine.body:r1": [ScriptedResponse(files={"doc.md": DOC1})],
+            "refine.critic:r1": [
+                ScriptedResponse(
+                    files={
+                        "verdict.json": _verdict_with(
+                            "approved", [{"note": "мелочь, но неверно"}]
+                        )
+                    }
+                )
+            ],
+        },
+    )
+    text = _unresolved(run_dir).read_text("utf-8")
+    assert "одобрил" in text
+    assert "мелочь, но неверно" in text
+
+
+def test_a_clean_approval_writes_no_file(tmp_path: Path) -> None:
+    """Nothing open means nothing to report — an empty report is noise."""
+    _, agents, reg = _library(tmp_path)
+    _status, _ledger, run_dir = _run(
+        tmp_path,
+        _loop_pipeline(max_rounds=2, on_max_rounds="pass"),
+        agents,
+        reg,
+        {
+            "refine.body:r1": [ScriptedResponse(files={"doc.md": DOC1})],
+            "refine.critic:r1": [
+                ScriptedResponse(files={"verdict.json": _verdict("approved")})
+            ],
+        },
+    )
+    assert not _unresolved(run_dir).exists()
+
+
+def test_the_report_names_the_round_it_came_from(tmp_path: Path) -> None:
+    """The chosen round, not the last one attempted: they differ after an approval."""
+    _, agents, reg = _library(tmp_path)
+    _status, _ledger, run_dir = _run(
+        tmp_path,
+        _loop_pipeline(max_rounds=3, on_max_rounds="pass"),
+        agents,
+        reg,
+        {
+            "refine.body:r1": [ScriptedResponse(files={"doc.md": DOC1})],
+            "refine.body:r2": [ScriptedResponse(files={"doc.md": DOC2})],
+            "refine.critic:r1": [
+                ScriptedResponse(files={"verdict.json": _verdict("revise")})
+            ],
+            "refine.critic:r2": [
+                ScriptedResponse(
+                    files={
+                        "verdict.json": _verdict_with("approved", [{"note": "остаток"}])
+                    }
+                )
+            ],
+        },
+    )
+    text = _unresolved(run_dir).read_text("utf-8")
+    assert "круг 2 из 3" in text
+
+
+def test_the_open_items_are_announced_in_the_log(tmp_path: Path) -> None:
+    """A file nobody is told about is a file nobody reads."""
+    _, agents, reg = _library(tmp_path)
+    _status, _ledger, run_dir = _run(
+        tmp_path,
+        _loop_pipeline(max_rounds=1, on_max_rounds="pass"),
+        agents,
+        reg,
+        {
+            "refine.body:r1": [ScriptedResponse(files={"doc.md": DOC1})],
+            "refine.critic:r1": [
+                ScriptedResponse(
+                    files={"verdict.json": _verdict_with("revise", [{"note": "раз"}])}
+                )
+            ],
+        },
+    )
+    events = (run_dir / "events.jsonl").read_text("utf-8")
+    assert "unresolved.md" in events
+    assert "1 open item(s)" in events
+
+
+def test_a_verdict_without_issues_is_not_a_crash(tmp_path: Path) -> None:
+    """`issues` is optional in verdict@v1, so its absence must read as "nothing open"."""
+    _, agents, reg = _library(tmp_path)
+    status, _ledger, run_dir = _run(
+        tmp_path,
+        _loop_pipeline(max_rounds=1, on_max_rounds="pass"),
+        agents,
+        reg,
+        {
+            "refine.body:r1": [ScriptedResponse(files={"doc.md": DOC1})],
+            "refine.critic:r1": [
+                ScriptedResponse(files={"verdict.json": _verdict("revise")})
+            ],
+        },
+    )
+    assert status is RunStatus.completed
+    assert not _unresolved(run_dir).exists()
