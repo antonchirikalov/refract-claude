@@ -11,6 +11,7 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _NAME_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
 _PORT_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
 _BASE_CAPABILITIES = frozenset({"read", "edit", "vision", "bash", "webfetch"})
@@ -72,7 +73,30 @@ class AgentSpec(BaseModel):
     consumes: list[Port] = Field(default_factory=list)
     produces: list[Port]
     needs: list[str] = Field(default_factory=list)
+    # Environment variables this agent needs its step to be given (SPEC §6, I8).
+    #
+    # Only names, never values. An agent that reaches an external service through an MCP
+    # server declares it in `needs` and its secret follows from `mcp.yaml`; an agent that
+    # shells out to a CLI has nowhere to say what that CLI reads from the environment —
+    # and the step environment is an allow-list, so what is not declared is not passed.
+    # Measured: the illustrator invokes a figure tool over `bash`, needs four variables,
+    # and its failure with none of them present is a stack trace three retries deep.
+    #
+    # Declaring them also makes the check possible: a missing variable is a validation
+    # warning before the run spends anything, not a step that ran without its tool.
+    env: list[str] = Field(default_factory=list)
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+
+    @field_validator("env")
+    @classmethod
+    def _env_names(cls, v: list[str]) -> list[str]:
+        for name in v:
+            if not _ENV_NAME_RE.match(name):
+                raise ValueError(
+                    f"invalid environment variable name {name!r}: names only, "
+                    "never values"
+                )
+        return v
 
     @field_validator("name")
     @classmethod

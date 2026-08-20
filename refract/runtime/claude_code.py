@@ -24,9 +24,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import shutil
 import sys
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -227,6 +229,124 @@ def env_placeholders(value: str) -> str:
     return _ENV_PLACEHOLDER.sub(r"${\1}", value)
 
 
+# --- I8: the environment a step actually gets --------------------------------
+
+# Variables a process needs to exist at all. Not a policy choice — a `claude` run with
+# these missing does not fail with a diagnosable error, it fails to start, and on Windows
+# most of them are load-bearing: the CLI is node, it resolves its own install through PATH
+# and PATHEXT, reads its credentials under USERPROFILE/APPDATA, and writes temporaries
+# through TEMP. `HOME` is here for the POSIX side of the same need.
+_BASE_ENV_VARS = frozenset(
+    {
+        "PATH",
+        "PATHEXT",
+        "SYSTEMROOT",
+        "WINDIR",
+        "COMSPEC",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "USERPROFILE",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "HOME",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "PROGRAMDATA",
+        "PROGRAMFILES",
+        "PROGRAMFILES(X86)",
+        "PROGRAMW6432",
+        "SYSTEMDRIVE",
+        "NUMBER_OF_PROCESSORS",
+        "PROCESSOR_ARCHITECTURE",
+        "OS",
+        "LANG",
+        "LC_ALL",
+        "TZ",
+        "USERNAME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TERM",
+        # node and the CLI itself read these; withholding them breaks proxied networks
+        # and TLS trust stores rather than protecting anything
+        "NODE_EXTRA_CA_CERTS",
+        "NODE_OPTIONS",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+    }
+)
+
+# The escape hatch. A wrong allow-list is discovered on a live run, expensively, and a
+# person needs a way to finish that run without editing the engine.
+INHERIT_ENV_VAR = "REFRACT_INHERIT_ENV"
+
+
+def secret_vars(needs: Sequence[str], mcp: McpFile) -> set[str]:
+    """Names of env vars the step's declared MCP servers refer to (SPEC §7/I8).
+
+    Only the servers this step's agent asked for, and only the names — values are never
+    read here. ``mcp.yaml`` writes secrets as ``{env:VAR}`` precisely so that the config
+    can be built without them.
+    """
+    wanted = {n.split(":", 1)[1] for n in needs if n.startswith("mcp:")}
+    out: set[str] = set()
+    for name, server in mcp.servers.items():
+        if name not in wanted:
+            continue
+        # Two spellings, because the two server kinds carry a secret differently: an HTTP
+        # server names the variable outright in `token_env`, a stdio one writes
+        # `{env:VAR}` inside its command or env. Reading only one of them would starve
+        # half the servers of their credential and look exactly like a bad token.
+        token_env = getattr(server, "token_env", None)
+        if isinstance(token_env, str) and token_env:
+            out.add(token_env)
+        blob = json.dumps(server.model_dump(mode="json"), ensure_ascii=False)
+        out.update(_ENV_PLACEHOLDER.findall(blob))
+    return out
+
+
+def step_env(
+    parent: Mapping[str, str],
+    *,
+    needs: Sequence[str],
+    mcp: McpFile,
+    provider_key_vars: Iterable[str] = (),
+    declared: Iterable[str] = (),
+) -> dict[str, str]:
+    """The environment for one step: base + declared secrets, nothing else (I8).
+
+    The runtime used to spawn the CLI with no ``env=`` at all, so a step inherited
+    everything the launching shell held. Measured on a live run: the figure step needed a
+    gateway's variables, they were exported into the launching process, and every other
+    agent in that run — eight of them — got a corporate image-provider key they had no
+    business seeing. The invariant existed in SPEC §2 from the start and was never
+    implemented.
+
+    Allow-list rather than deny-list, because the failure modes are not symmetric: a
+    missing variable breaks a step visibly and is fixed in one place, while a leaked one
+    is invisible and cannot be taken back.
+
+    ``REFRACT_INHERIT_ENV=1`` in the parent restores full inheritance. It exists because a
+    wrong allow-list is discovered mid-run, and the person on the other end needs to finish
+    the run rather than patch the engine.
+    """
+    if parent.get(INHERIT_ENV_VAR, "").strip() not in ("", "0", "false", "no"):
+        return dict(parent)
+    allowed = (
+        set(_BASE_ENV_VARS)
+        | set(provider_key_vars)
+        | set(declared)
+        | secret_vars(needs, mcp)
+    )
+    upper = {v.upper() for v in allowed}
+    return {k: v for k, v in parent.items() if k in allowed or k.upper() in upper}
+
+
 def mcp_config(needs: list[str], mcp: McpFile) -> dict[str, object]:
     """The ``--mcp-config`` document for a step: only the servers it declared (I8).
 
@@ -383,11 +503,13 @@ class ClaudeCodeRuntime:
         self,
         *,
         mcp: McpFile,
+        provider_key_vars: Sequence[str] = (),
         exe: str | None = None,
         heartbeat_s: float = 10.0,
         permission_mode: str = "bypassPermissions",
     ) -> None:
         self._mcp = mcp
+        self._provider_key_vars = tuple(provider_key_vars)
         self._exe = exe or DEFAULT_EXE
         self._heartbeat_s = heartbeat_s
         self._permission_mode = permission_mode
@@ -463,6 +585,13 @@ class ClaudeCodeRuntime:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 cwd=str(spec.workdir),
+                env=step_env(
+                    os.environ,
+                    needs=spec.needs,
+                    mcp=self._mcp,
+                    provider_key_vars=self._provider_key_vars,
+                    declared=spec.env,
+                ),
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

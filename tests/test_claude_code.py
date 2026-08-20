@@ -645,3 +645,94 @@ class TestEnvPlaceholders:
         assert env_placeholders("npx") == "npx"
         assert env_placeholders("${ALREADY}") == "${ALREADY}"
         assert env_placeholders("{env:A}/{env:B}") == "${A}/${B}"
+
+
+# --- I8: the environment a step gets ----------------------------------------
+
+
+class TestStepEnvironment:
+    """The runtime used to spawn the CLI with no `env=`, so a step inherited whatever the
+    launching shell held. Measured live: the figure step needed a gateway's variables,
+    they were exported into the launching process, and eight other agents in that run got
+    a corporate image-provider key they had no business seeing."""
+
+    def _mcp(self) -> McpFile:
+        return McpFile.model_validate(
+            {
+                "servers": {
+                    "tavily-remote": {
+                        "url": "https://example.org/mcp",
+                        "token_env": "TAVILY_API_KEY",
+                    },
+                    "other": {
+                        "command": ["node", "x.js"],
+                        "env": {"OTHER_TOKEN": "{env:OTHER_SECRET}"},
+                    },
+                }
+            }
+        )
+
+    def test_only_declared_secrets_survive(self) -> None:
+        from refract.runtime.claude_code import step_env
+
+        parent = {
+            "PATH": "/bin",
+            "TAVILY_API_KEY": "t",
+            "OTHER_SECRET": "o",
+            "MOONSHOT_API_KEY": "leak",
+            "SS_GATEWAY_PROFILE": "leak",
+            "ANTHROPIC_API_KEY": "k",
+        }
+        env = step_env(
+            parent,
+            needs=["read", "mcp:tavily-remote"],
+            mcp=self._mcp(),
+            provider_key_vars=["ANTHROPIC_API_KEY"],
+        )
+        assert env["PATH"] == "/bin"
+        assert env["TAVILY_API_KEY"] == "t"  # this step declared that server
+        assert env["ANTHROPIC_API_KEY"] == "k"  # a declared provider key
+        assert "OTHER_SECRET" not in env  # a server this step did not ask for
+        assert "MOONSHOT_API_KEY" not in env  # nothing declared it at all
+        assert "SS_GATEWAY_PROFILE" not in env
+
+    def test_base_variables_are_kept_because_nothing_runs_without_them(self) -> None:
+        from refract.runtime.claude_code import step_env
+
+        parent = {
+            "PATH": "/bin",
+            "SYSTEMROOT": "C:/Windows",
+            "APPDATA": "C:/Users/x/AppData/Roaming",
+            "TEMP": "C:/T",
+            "USERPROFILE": "C:/Users/x",
+            "SECRET": "s",
+        }
+        env = step_env(parent, needs=[], mcp=McpFile())
+        for k in ("PATH", "SYSTEMROOT", "APPDATA", "TEMP", "USERPROFILE"):
+            assert k in env, k
+        assert "SECRET" not in env
+
+    def test_secret_vars_reads_names_not_values(self) -> None:
+        from refract.runtime.claude_code import secret_vars
+
+        assert secret_vars(["mcp:tavily-remote"], self._mcp()) == {"TAVILY_API_KEY"}
+        assert secret_vars(["mcp:other"], self._mcp()) == {"OTHER_SECRET"}
+        assert secret_vars(["read"], self._mcp()) == set()
+
+    def test_the_escape_hatch_restores_inheritance(self) -> None:
+        """A wrong allow-list is found mid-run; the person needs to finish that run."""
+        from refract.runtime.claude_code import step_env
+
+        parent = {"PATH": "/bin", "SECRET": "s", "REFRACT_INHERIT_ENV": "1"}
+        assert step_env(parent, needs=[], mcp=McpFile()) == parent
+
+    def test_the_hatch_off_by_default_and_by_falsy_values(self) -> None:
+        from refract.runtime.claude_code import step_env
+
+        for value in ("", "0", "false", "no"):
+            env = step_env(
+                {"PATH": "/bin", "SECRET": "s", "REFRACT_INHERIT_ENV": value},
+                needs=[],
+                mcp=McpFile(),
+            )
+            assert "SECRET" not in env, value

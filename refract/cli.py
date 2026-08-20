@@ -453,7 +453,14 @@ def _default_runtime_factory(app: AppConfig, pipeline: Pipeline) -> AgentRuntime
     """
     from refract.runtime.claude_code import ClaudeCodeRuntime
 
-    return ClaudeCodeRuntime(mcp=app.mcp)
+    # Which provider key variables a step may see (I8): only those declared by providers
+    # this app knows, and only their NAMES travel — values stay in the environment.
+    key_vars = [
+        p.api_key_env
+        for p in app.providers.providers.values()
+        if p.api_key_env is not None
+    ]
+    return ClaudeCodeRuntime(mcp=app.mcp, provider_key_vars=key_vars)
 
 
 def _print_errors(errors: Sequence[object]) -> None:

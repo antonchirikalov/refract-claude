@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 import yaml
 
 from refract.graph import validate_pipeline
@@ -1373,3 +1375,85 @@ nodes:
         blocking = [e for e in errors if not e.code.value.startswith("W_")]
         assert blocking == [], blocking
         assert order  # the graph still resolves and would run
+
+
+# --- W_ENV_MISSING: a declared variable that is not there (SPEC §6, I8) ------
+
+
+class TestDeclaredEnvironment:
+    """The step environment is an allow-list, so an unset declared variable means the
+    agent's external tool starts without its configuration — which surfaces as a stack
+    trace three retries deep. Measured on the figure step across two runs."""
+
+    def _agents(self, env: list[str]) -> dict:
+        spec = agent_spec(
+            "shellagent",
+            consumes=[{"port": "brief", "type": "brief@v1"}],
+            produces=[{"port": "doc", "type": "requirements@v1"}],
+            needs=["bash"],
+        )
+        return {"shellagent@1": spec.model_copy(update={"env": env})}
+
+    def _pipeline(self):
+        return _pipeline(
+            """
+version: "0.1"
+name: p
+input_mode: brief
+nodes:
+  - id: brief
+    type: builtin/brief
+  - id: work
+    type: agent
+    agent: shellagent@1
+    inputs: { brief: brief.brief }
+"""
+        )
+
+    def test_an_unset_declared_variable_warns(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("REFRACT_TEST_TOOL_HOME", raising=False)
+        ctx = make_ctx(tmp_path, agents=self._agents(["REFRACT_TEST_TOOL_HOME"]))
+        _order, errors = validate_pipeline(self._pipeline(), ctx)
+        assert Code.W_ENV_MISSING in _codes(errors)
+        assert all(e.code.is_warning for e in errors if e.code is Code.W_ENV_MISSING)
+
+    def test_a_set_variable_is_silent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("REFRACT_TEST_TOOL_HOME", "C:/tool")
+        ctx = make_ctx(tmp_path, agents=self._agents(["REFRACT_TEST_TOOL_HOME"]))
+        _order, errors = validate_pipeline(self._pipeline(), ctx)
+        assert Code.W_ENV_MISSING not in _codes(errors)
+
+    def test_an_empty_value_counts_as_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A variable set to whitespace configures nothing and reads as configured."""
+        monkeypatch.setenv("REFRACT_TEST_TOOL_HOME", "   ")
+        ctx = make_ctx(tmp_path, agents=self._agents(["REFRACT_TEST_TOOL_HOME"]))
+        _order, errors = validate_pipeline(self._pipeline(), ctx)
+        assert Code.W_ENV_MISSING in _codes(errors)
+
+    def test_declaring_nothing_warns_about_nothing(self, tmp_path: Path) -> None:
+        ctx = make_ctx(tmp_path, agents=self._agents([]))
+        _order, errors = validate_pipeline(self._pipeline(), ctx)
+        assert Code.W_ENV_MISSING not in _codes(errors)
+
+    def test_a_value_in_place_of_a_name_is_refused(self) -> None:
+        """Only NAMES, never values: an agent package is in git."""
+        import pydantic
+
+        from refract.models.agent import AgentSpec
+
+        for bad in ("KEY=secret", "sk-abc123", "has space"):
+            with pytest.raises(pydantic.ValidationError):
+                AgentSpec.model_validate(
+                    {
+                        "name": "a",
+                        "version": 1,
+                        "produces": [{"port": "doc", "type": "requirements@v1"}],
+                        "env": [bad],
+                    }
+                )

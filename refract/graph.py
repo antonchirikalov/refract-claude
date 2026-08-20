@@ -966,6 +966,42 @@ class _Validator:
         self._warn_cache()
         self._warn_security()
         self._warn_thresholds()
+        self._warn_env()
+
+    def _warn_env(self) -> None:
+        """An agent's declared env var that is not set here (SPEC §6, I8).
+
+        A warning rather than an error: the run may be launched by something that sets it,
+        and validation runs in a different shell. But saying nothing is worse — the step
+        environment is an allow-list, so an undeclared or unset variable means the agent's
+        external tool starts without its configuration, and that surfaces as a stack trace
+        three retries deep. Measured on the figure step: two runs lost every attempt that
+        way before anyone looked at the environment.
+        """
+        import os
+
+        for node_id, node in self.nodes.items():
+            for ref in self._node_agent_refs(node):
+                spec = self.agent(ref)
+                if spec is None:
+                    continue
+                for name in spec.env:
+                    if not os.environ.get(name, "").strip():
+                        self.err(
+                            Code.W_ENV_MISSING,
+                            node_id,
+                            f"agent {ref!r} declares env {name!r}, which is not set here",
+                        )
+
+    def _node_agent_refs(self, node: Node) -> list[str]:
+        """Agent refs this node binds, for checks that apply per agent."""
+        if isinstance(node, AgentNode | DiscoverNode):
+            return [node.agent]
+        if isinstance(node, LoopNode):
+            return [*(b.agent for b in node.body_chain), node.critic.agent]
+        if isinstance(node, SelectNode):
+            return [node.selector.agent]
+        return []
 
     def _warn_cache(self) -> None:
         for node in self.nodes.values():

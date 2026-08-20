@@ -9,7 +9,7 @@ files the agent wrote under ``workdir/output/`` (the gate, §10.2) — NOT by
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
@@ -28,7 +28,10 @@ class StepSpec:
     prompt: str  # task prompt (§11 items 2–4); system prompt is in the package
     system_prompt: str  # contents of the agent's prompt.md
     needs: list[str]
-    timeout_s: int
+    # Environment variable NAMES the agent declared (SPEC §6, I8). The runtime passes
+    # these through from its own environment; values never travel in the spec.
+    env: list[str] = field(default_factory=list)
+    timeout_s: int = 3600
 
 
 @dataclass

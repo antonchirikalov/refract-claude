@@ -47,6 +47,10 @@ class Code(str, Enum):
     W_CACHE_UNSUPPORTED = "W_CACHE_UNSUPPORTED"
     W_SECURITY = "W_SECURITY"
     W_THRESHOLDS = "W_THRESHOLDS"
+    # §6/I8: an agent declares an env var that is not set where the run starts.
+    # A warning, not an error: the variable may legitimately be set by whatever
+    # launches the run rather than by the shell that validates it.
+    W_ENV_MISSING = "W_ENV_MISSING"
 
     @property
     def is_warning(self) -> bool:

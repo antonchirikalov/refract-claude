@@ -15,6 +15,20 @@ produces:
 # not match Bash, so on this step I1 rests on the prompt rather than on the hook. It
 # goes away when builtins can consume an input and the engine runs the tool itself.
 needs: [read, edit, bash]
+# The figure tool is a CLI, not an MCP server, so what it reads from the environment has
+# to be declared here or the step will not be given it (I8). Names only.
+#   PAPERBANANA_BIN  — the executable; it lives in its own virtualenv, not on PATH
+#   SS_GATEWAY_*     — how the image provider reaches the gateway
+#   MOONSHOT_API_KEY — the vision critic that reviews each rendered figure
+env:
+  - PAPERBANANA_BIN
+  - SS_GATEWAY_COMMAND
+  - SS_GATEWAY_WRAPPER
+  - SS_GATEWAY_PROFILE
+  - SS_GATEWAY_BACKEND
+  - SS_GATEWAY_IMAGE_MODEL
+  - IMAGE_PROVIDER
+  - MOONSHOT_API_KEY
 defaults:
   # four diagrams through a tool that runs its own refinement loop per figure
   timeout_s: 3600
