@@ -80,6 +80,15 @@ you would have drawn — you brief the tool well and let it work.
 
 4. Run the tool once per figure, from your working directory:
 
+   KNOWN, and left as it is on purpose: the bridge process the tool spawns writes its own
+   scratch files into the directory it was started in — certificate caches among them,
+   with names that arrive mangled through the console codepage. Eleven such entries landed
+   in the root of a step across two runs, beside `prompt.md` and `output/`, and were
+   archived with the attempt. Nothing breaks, and the gate does not see it: it counts what
+   is in `output/`. Running the tool one directory down would fix it, but every relative
+   path in this section would have to move with it, and this section cannot be exercised
+   without the gateway — so it stays until a run can prove the change.
+
    ```
    <bin> generate \
      --input figure-<slug>.txt \
