@@ -278,6 +278,26 @@ _BASE_ENV_VARS = frozenset(
         "http_proxy",
         "https_proxy",
         "no_proxy",
+        # Where the CLI keeps the subscription login. Withhold it and every step reports
+        # "not logged in" — the whole run fails for a reason that looks nothing like a
+        # missing variable.
+        "CLAUDE_CONFIG_DIR",
+        "XDG_CONFIG_HOME",
+        "XDG_CACHE_HOME",
+        # the rest of the TLS trust stores, beside NODE_EXTRA_CA_CERTS above
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        # a `bash` agent's toolchain: git over ssh, a python venv, PowerShell modules
+        "SSH_AUTH_SOCK",
+        "GIT_SSH",
+        "GIT_SSH_COMMAND",
+        "GIT_CONFIG_GLOBAL",
+        "VIRTUAL_ENV",
+        "PYTHONPATH",
+        "PYTHONIOENCODING",
+        "PSModulePath",
     }
 )
 
@@ -335,7 +355,7 @@ def step_env(
     wrong allow-list is discovered mid-run, and the person on the other end needs to finish
     the run rather than patch the engine.
     """
-    if parent.get(INHERIT_ENV_VAR, "").strip() not in ("", "0", "false", "no"):
+    if parent.get(INHERIT_ENV_VAR, "").strip().lower() not in ("", "0", "false", "no", "off"):
         return dict(parent)
     allowed = (
         set(_BASE_ENV_VARS)
@@ -343,6 +363,11 @@ def step_env(
         | set(declared)
         | secret_vars(needs, mcp)
     )
+    if os.name != "nt":
+        # Case-exact off Windows. The fold below exists for Windows' own spelling of
+        # `ComSpec`/`SystemRoot`; applying it on POSIX would let `openai_api_key` through
+        # on the strength of `OPENAI_API_KEY` being allowed — case matters there.
+        return {k: v for k, v in parent.items() if k in allowed}
     upper = {v.upper() for v in allowed}
     return {k: v for k, v in parent.items() if k in allowed or k.upper() in upper}
 

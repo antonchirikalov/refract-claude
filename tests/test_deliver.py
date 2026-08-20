@@ -324,7 +324,7 @@ def test_an_empty_file_is_missing_too(tmp_path: Path) -> None:
 def _with_unresolved(run_dir: Path, node: str, text: str) -> None:
     d = run_dir / "steps" / node / "_out"
     d.mkdir(parents=True, exist_ok=True)
-    (d / "unresolved.md").write_text(text, encoding="utf-8")
+    (d / "_unresolved.md").write_text(text, encoding="utf-8")
 
 
 def test_the_unresolved_report_travels_with_the_deliverable(tmp_path: Path) -> None:
@@ -339,9 +339,9 @@ def test_the_unresolved_report_travels_with_the_deliverable(tmp_path: Path) -> N
         agents=_agents(),
     )
     assert report.ok
-    text = (run_dir / "output" / "unresolved.md").read_text("utf-8")
+    text = (run_dir / "output" / "_unresolved.md").read_text("utf-8")
     assert "форма матриц неверна" in text
-    assert report.delivered["unresolved"] == "output/unresolved.md"
+    assert report.delivered["unresolved"] == "output/_unresolved.md"
 
 
 def test_two_loops_keep_their_findings_apart(tmp_path: Path) -> None:
@@ -370,4 +370,4 @@ def test_nothing_open_means_no_report_in_the_delivery(tmp_path: Path) -> None:
         agents=_agents(),
     )
     assert "unresolved" not in report.delivered
-    assert not (run_dir / "output" / "unresolved.md").exists()
+    assert not (run_dir / "output" / "_unresolved.md").exists()

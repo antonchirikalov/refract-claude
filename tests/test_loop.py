@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+
+import pytest
 from pathlib import Path
 
 import yaml
@@ -1002,3 +1004,98 @@ def test_an_approval_beats_the_plateau(tmp_path: Path) -> None:
     )
     assert status is RunStatus.completed
     assert "refine.body:r3" not in ledger.state.steps
+
+
+def test_a_plateau_does_not_override_a_declared_failure(tmp_path: Path) -> None:
+    """`on_max_rounds: fail` says what an unapproved draft is worth; the plateau only says
+    when to stop paying. Reading these the other way round turned a declared failure into a
+    `done` node that shipped round 1."""
+    _, agents, reg = _library(tmp_path)
+    pl = Pipeline.model_validate(
+        {
+            "version": "0.1",
+            "name": "refine",
+            "nodes": [
+                {
+                    "id": "refine",
+                    "type": "loop",
+                    "params": {
+                        "max_rounds": 4,
+                        "on_max_rounds": "fail",
+                        "model": "kimi/kimi-k3",
+                        "plateau_rounds": 2,
+                    },
+                    "body": {"agent": "writer@1"},
+                    "critic": {"agent": "critic@1", "inputs": {"draft": "@body"}},
+                    "outputs": {"doc": "@body"},
+                }
+            ],
+        }
+    )
+    status, ledger, _run_dir = _run(tmp_path, pl, agents, reg, _scenario([5, 5, 5]))
+    assert status is RunStatus.failed
+    assert ledger.state.nodes["refine"].status is NodeStatus.failed
+    assert "plateau" in (ledger.state.nodes["refine"].error or "")
+
+
+def test_a_revise_with_no_issues_is_unmeasurable_not_zero(tmp_path: Path) -> None:
+    """`issues` is optional in verdict@v1 and four shipped critics never mention it.
+
+    Counting the absence as zero made round 1 unbeatable: every later round failed to
+    improve on nothing, the plateau fired at round 3, and the FIRST draft shipped — with
+    every round paid for and no report saying why.
+    """
+    _, agents, reg = _library(tmp_path)
+    scenario = {
+        "refine.body:r1": [ScriptedResponse(files={"doc.md": DOC1})],
+        "refine.body:r2": [ScriptedResponse(files={"doc.md": DOC2})],
+        "refine.body:r3": [ScriptedResponse(files={"doc.md": DOC3})],
+        # every verdict is a bare `revise`, exactly what those critics emit
+        **{
+            f"refine.critic:r{n}": [
+                ScriptedResponse(files={"verdict.json": _verdict("revise")})
+            ]
+            for n in (1, 2, 3)
+        },
+    }
+    status, ledger, run_dir = _run(
+        tmp_path,
+        _plateau_pipeline(max_rounds=3, plateau_rounds=2),
+        agents,
+        reg,
+        scenario,
+    )
+    assert status is RunStatus.completed
+    # all three rounds ran, and the LAST draft shipped — not the first
+    assert "refine.critic:r3" in ledger.state.steps
+    assembled = (run_dir / "steps" / "refine" / "_out" / "doc.md").read_text("utf-8")
+    assert assembled == DOC3, "an unmeasurable round set a floor no later round could beat"
+    events = (run_dir / "events.jsonl").read_text("utf-8")
+    assert "named no issues" in events
+    assert "plateau:" not in events
+
+
+def test_plateau_rounds_must_be_at_least_one(tmp_path: Path) -> None:
+    """`0` fired the plateau after round 1 and logged "0 round(s) without improving".
+
+    `null` is already the documented way to switch the check off.
+    """
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        Pipeline.model_validate(
+            {
+                "version": "0.1",
+                "name": "refine",
+                "nodes": [
+                    {
+                        "id": "refine",
+                        "type": "loop",
+                        "params": {"model": "kimi/kimi-k3", "plateau_rounds": 0},
+                        "body": {"agent": "writer@1"},
+                        "critic": {"agent": "critic@1", "inputs": {"draft": "@body"}},
+                        "outputs": {"doc": "@body"},
+                    }
+                ],
+            }
+        )

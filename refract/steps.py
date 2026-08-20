@@ -219,12 +219,17 @@ def _materialize(inputs: list[InputSpec], input_root: Path) -> None:
 
 
 def _rejected_input(workdir: Path, archived: int) -> str | None:
-    """Link the archived attempt's ``output/`` in as ``input/_rejected/`` (SPEC §10.2).
+    """COPY the archived attempt's ``output/`` in as ``input/_rejected/`` (SPEC §10.2).
 
     A gate retry is an EDIT, not a fresh start: the feedback names what is wrong with a
-    specific document, and the document is the cheapest thing the step already has. It is
-    linked read-only in spirit — the agent writes its result to ``output/`` as always, and
-    the archive stays untouched as the record of what was rejected.
+    specific document, and the document is the cheapest thing the step already has.
+
+    A copy, not ``link_or_copy``. That helper prefers a symlink, and a symlink here points
+    into ``attempts/<n>/output/`` — inside the workdir, so the guard permits writing
+    through it. The prompt says "copy it to your output and edit", and an agent that edits
+    in place instead would silently rewrite the archived record of what the gate rejected
+    (I2) while leaving ``output/`` empty. The archive is the one thing in a step that must
+    not change, so this tree is the one place that must not be linked.
     """
     src = workdir / "attempts" / str(archived) / "output"
     if not src.is_dir() or not any(src.iterdir()):
@@ -234,8 +239,71 @@ def _rejected_input(workdir: Path, archived: int) -> str | None:
         shutil.rmtree(long_path(dst))
     dst.mkdir(parents=True, exist_ok=True)
     for child in sorted(src.iterdir()):
-        link_or_copy(child, dst / child.name)
+        if child.is_dir():
+            shutil.copytree(long_path(child), long_path(dst / child.name))
+        else:
+            shutil.copy2(long_path(child), long_path(dst / child.name))
     return "input/_rejected"
+
+
+def _resume_retry_context(workdir: Path) -> tuple[str | None, str | None]:
+    """Rebuild the retry context after a resume: ``(rejected_dir, gate_feedback)``.
+
+    A resumed step re-enters ``execute_agent_step`` with ``tries`` back at 0 and both
+    locals gone, and ``_materialize`` wipes ``input/`` — so the rejected document and the
+    feedback that names its faults both vanish, and the agent writes the artifact again
+    from its sources. That is the very rewrite this mechanism exists to prevent, and it
+    would happen precisely on the runs that already cost the most.
+
+    Everything needed is on disk in ``attempts/<n>/``: rebuild from the newest archive.
+    """
+    # The workdir root first. An attempt is archived at the START of the next iteration, so
+    # a step that died after a gate failure — the exact shape of an interrupted retry —
+    # leaves its rejected output and report sitting in the root, never archived.
+    root = _retry_context_from(workdir)
+    if root != (None, None):
+        return root
+    attempts = workdir / "attempts"
+    if not attempts.is_dir():
+        return None, None
+    numbers = sorted(
+        (int(d.name) for d in attempts.iterdir() if d.is_dir() and d.name.isdigit()),
+        reverse=True,
+    )
+    for n in numbers:
+        rejected = _rejected_input(workdir, n)
+        if rejected is None:
+            continue  # that attempt produced nothing; try the one before it
+        return rejected, _feedback_from(attempts / str(n) / "gate_report.json")
+    return None, None
+
+
+def _feedback_from(report_path: Path) -> str | None:
+    """The gate's own wording for a previous attempt, or ``None`` if unreadable."""
+    if not report_path.exists():
+        return None
+    try:
+        report = GateReport.model_validate_json(report_path.read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    return _format_feedback(report) or None
+
+
+def _retry_context_from(workdir: Path) -> tuple[str | None, str | None]:
+    """Retry context from an UNARCHIVED attempt left in the workdir root (SPEC §10.2)."""
+    report_path = workdir / "gate_report.json"
+    output = workdir / "output"
+    if not report_path.exists() or not output.is_dir() or not any(output.iterdir()):
+        return None, None
+    feedback = _feedback_from(report_path)
+    if feedback is None:
+        return None, None  # the gate passed, or the report is unreadable: nothing rejected
+    # Archive it now, under the next free slot, so the copy handed back is a copy of a
+    # record rather than of a live directory the step is about to overwrite.
+    n = _next_attempt(workdir)
+    _archive_attempt(workdir, n)
+    output.mkdir(parents=True, exist_ok=True)
+    return _rejected_input(workdir, n), feedback
 
 
 def _archive_attempt(workdir: Path, n: int) -> None:
@@ -245,6 +313,14 @@ def _archive_attempt(workdir: Path, n: int) -> None:
     if dest.exists() and any(dest.iterdir()):
         raise RuntimeError(f"attempt archive already populated: {dest}")
     dest.mkdir(parents=True, exist_ok=True)
+    # I9 wants each attempt's record self-contained, and the archived `prompt.md` names
+    # `input/_rejected/` — a directory the NEXT retry overwrites. Record what was actually
+    # in it, so reading attempt 3 does not silently describe attempt 4's inputs.
+    rejected = workdir / "input" / "_rejected"
+    if rejected.is_dir():
+        names = sorted(c.name for c in rejected.iterdir())
+        text = "\n".join(names) + "\n"
+        (dest / "rejected_inputs.txt").write_text(text, "utf-8")
     for name in _ARCHIVED:
         src = workdir / name
         if src.exists():
@@ -440,8 +516,9 @@ async def execute_agent_step(
     # tries counts COMPLETED gate attempts; timeout/failed_infra report the
     # count reached before the terminal failure (0 if it never completed a run).
     tries = 0
-    gate_feedback: str | None = None
-    rejected: str | None = None
+    # A resume re-enters here with the counters reset, so the retry context is rebuilt from
+    # the archives rather than assumed absent.
+    rejected, gate_feedback = _resume_retry_context(workdir)
     while True:
         if tries > 0:  # gate retry: archive the prior completed attempt first
             # allocate the next free slot, not `tries` — a HITL answer-resume may
@@ -482,6 +559,7 @@ async def execute_agent_step(
             prompt=task_prompt,
             system_prompt=system_prompt,
             needs=list(plan.agent.needs),
+            env=list(plan.agent.env),
             timeout_s=plan.timeout_s,
         )
 

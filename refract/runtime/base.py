@@ -9,7 +9,7 @@ files the agent wrote under ``workdir/output/`` (the gate, §10.2) — NOT by
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -17,7 +17,7 @@ from typing import Protocol
 EventCallback = Callable[[dict[str, object]], None]
 
 
-@dataclass
+@dataclass(kw_only=True)
 class StepSpec:
     """Everything a runtime needs to execute one step (SPEC §12)."""
 
@@ -30,8 +30,8 @@ class StepSpec:
     needs: list[str]
     # Environment variable NAMES the agent declared (SPEC §6, I8). The runtime passes
     # these through from its own environment; values never travel in the spec.
-    env: list[str] = field(default_factory=list)
-    timeout_s: int = 3600
+    env: list[str]
+    timeout_s: int
 
 
 @dataclass

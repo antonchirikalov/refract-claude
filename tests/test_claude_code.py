@@ -56,7 +56,8 @@ def _spec(
         workdir=tmp_path / "work",
         prompt="Task prompt.",
         system_prompt="You are a source processor.",
-        needs=needs,
+        env=[],
+            needs=needs,
         timeout_s=1800,
     )
 

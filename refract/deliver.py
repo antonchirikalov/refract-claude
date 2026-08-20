@@ -18,6 +18,7 @@ Two rules the assembly keeps:
 
 from __future__ import annotations
 
+import json
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -56,7 +57,10 @@ class DeliveryReport:
         return lines
 
 
-UNRESOLVED_FILENAME = "unresolved.md"
+# Underscore-prefixed so it cannot collide with a declared output: port names
+# (and therefore delivery names) cannot start with one, so `unresolved: ...` in a
+# pipeline gets `unresolved.md` and the engine's own report stays separate.
+UNRESOLVED_FILENAME = "_unresolved.md"
 
 
 def _deliver_unresolved(run_dir: Path, out_dir: Path, report: DeliveryReport) -> None:
@@ -84,7 +88,29 @@ def _deliver_unresolved(run_dir: Path, out_dir: Path, report: DeliveryReport) ->
     report.delivered["unresolved"] = f"{OUTPUT_DIRNAME}/unresolved/ ({len(found)})"
 
 
-def _unusable(src: Path) -> str | None:
+def _collection_unusable(src: Path) -> str | None:
+    """Why a collection directory cannot be delivered, or ``None``.
+
+    Non-emptiness is not enough for a collection: the manifest itself is always there, so a
+    run whose every element failed delivers a directory holding `_collection.json` and
+    nothing else — and reports it as delivered. The manifest is the one thing that knows
+    the difference.
+    """
+    manifest = src / "_collection.json"
+    if not manifest.exists():
+        return "produced a collection with no _collection.json"
+    try:
+        data = json.loads(manifest.read_text("utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return f"produced an unreadable _collection.json ({exc})"
+    items = data.get("items") if isinstance(data, dict) else None
+    ok = [i for i in items if isinstance(i, dict) and i.get("status") == "ok"] if isinstance(items, list) else []
+    if not ok:
+        return "produced a collection whose every element failed"
+    return None
+
+
+def _unusable(src: Path, *, is_collection: bool = False) -> str | None:
     """Why this artifact cannot be delivered, or ``None`` if it can.
 
     Existence is not enough, and the gate already knows it: a ``dir`` artifact is gated on
@@ -96,8 +122,11 @@ def _unusable(src: Path) -> str | None:
     if not src.exists():
         return "was not produced"
     if src.is_dir():
-        content = [c for c in src.iterdir() if not c.name.startswith(".")]
-        if not content:
+        if is_collection:
+            return _collection_unusable(src)
+        # A real FILE somewhere in the tree. A directory whose only child is another empty
+        # directory passed the old check, which counted entries at the top level only.
+        if not any(p.is_file() and not p.name.startswith(".") for p in src.rglob("*")):
             return "produced an empty directory"
         return None
     if src.stat().st_size == 0:
@@ -127,21 +156,26 @@ def _source_of(
     nodes: dict[str, Node],
     ptypes: dict[str, dict[str, str]],
     ref: DataRef,
-) -> tuple[Path, bool] | None:
-    """Where the producer wrote this port, and whether it is a directory artifact."""
+) -> tuple[Path, bool, bool] | None:
+    """Where the port was written, whether it is a directory, and whether a collection."""
     node = nodes.get(ref.node_id)
     if node is None:
         return None
     base = node_output_base(run_dir, node)
     type_name = ptypes.get(ref.node_id, {}).get(ref.port)
-    if type_name is None or type_name.startswith("collection<"):
-        # a collection, or a port the graph could not type: both live in a directory
-        # named after the port, which is what the assembly needs to know
-        return base / ref.port, True
+    if type_name is not None and type_name.startswith("collection<"):
+        return base / ref.port, True, True
+    if type_name is None:
+        # a port the graph could not type: treat as a plain directory named after it
+        return base / ref.port, True, False
     rtype = registry.get(type_name)
     if rtype is None:
-        return base / ref.port, True
-    return base / artifact_filename(ref.port, rtype), rtype.kind.value != "file"
+        return base / ref.port, True, False
+    return (
+        base / artifact_filename(ref.port, rtype),
+        rtype.kind.value != "file",
+        False,
+    )
 
 
 def deliver(
@@ -159,7 +193,9 @@ def deliver(
     run_dir = Path(run_dir)
     out_dir = run_dir / OUTPUT_DIRNAME
     report = DeliveryReport(output_dir=out_dir)
-    if not pipeline.outputs:
+    # No declared outputs still leaves the engine's own record to hand over: a pipeline whose
+    # result is read in place can still have a loop that left items open.
+    if not pipeline.outputs and not any(run_dir.glob(f"steps/*/_out/{UNRESOLVED_FILENAME}")):
         return report
 
     nodes: dict[str, Node] = {n.id: n for n in pipeline.nodes}
@@ -179,8 +215,8 @@ def deliver(
         if found is None:
             report.missing[name] = f"unknown node {ref.node_id!r}"
             continue
-        src, is_dir = found
-        why = _unusable(src)
+        src, is_dir, is_collection = found
+        why = _unusable(src, is_collection=is_collection)
         if why is not None:
             report.missing[name] = f"{ref_s} {why} ({src})"
             continue

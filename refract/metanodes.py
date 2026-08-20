@@ -23,6 +23,7 @@ from refract.artifacts import (
     artifact_filename,
     artifact_path,
     link_or_copy,
+    long_path,
     node_output_base,
 )
 from refract.graph import BodyRef, DataRef, PrevRef, parse_ref
@@ -234,7 +235,22 @@ async def run_loop(node: LoopNode, ctx: MetaContext) -> NodeStatus:
         # Two in a row and the loop stops — one bad round is noise, two is a shape. The
         # draft still passes on and its open items are still reported; this only declines
         # to pay for a third answer that is not getting shorter.
-        open_now = len(_verdict_issues(ctx, node, critic_agent, r))
+        # A `revise` verdict that names no issues is UNMEASURABLE, not zero. `issues` is
+        # optional in verdict@v1 and four of the shipped critics never mention it, so
+        # counting the absence as 0 made round 1 unbeatable: every later round failed to
+        # improve on nothing, the plateau fired, and the FIRST draft shipped while every
+        # round had been paid for. Skipping the accounting costs a round of budget and
+        # cannot ship the wrong draft.
+        issues = _verdict_issues(ctx, node, critic_agent, r)
+        if not issues:
+            _warn(
+                ctx,
+                node.id,
+                f"round {r}: the critic asked for a revision but named no issues, so "
+                "there is nothing to measure — the plateau check skips this round",
+            )
+            continue
+        open_now = len(issues)
         if open_now < best_open:
             best_open, best_round, since_best = open_now, r, 0
         else:
@@ -258,14 +274,22 @@ async def run_loop(node: LoopNode, ctx: MetaContext) -> NodeStatus:
 
     if approved_round is not None:
         chosen = approved_round
+    elif node.params.on_max_rounds == "fail":
+        # A declared failure outranks the plateau. The plateau decides WHEN to stop paying
+        # for rounds; `on_max_rounds` decides what an unapproved draft is worth, and a
+        # pipeline that said "unapproved means failed" does not change its mind because the
+        # loop stopped early. Reading these the other way round turned a declared failure
+        # into a `done` node.
+        stopped = (
+            f"plateau after {plateau_round} round(s)"
+            if plateau_round is not None
+            else f"{node.params.max_rounds} rounds"
+        )
+        return _fail(ctx, node.id, f"loop: {stopped} without approval")
     elif plateau_round is not None:
         # The loop stopped itself. Take the best round rather than the last: the point of
         # counting was that the last one is not the best.
         chosen = best_round
-    elif node.params.on_max_rounds == "fail":
-        return _fail(
-            ctx, node.id, f"loop: {node.params.max_rounds} rounds without approval"
-        )
     else:  # pass: take the last round's draft, warn (SPEC §10.3)
         chosen = last_round
         _warn(ctx, node.id, f"max_rounds ({node.params.max_rounds}) reached; passing")
@@ -448,7 +472,14 @@ def _verdict_data(
         _primary(critic_agent).port,
         vrtype,
     )
-    data = json.loads(path.read_text("utf-8"))
+    try:
+        data = json.loads(path.read_text("utf-8"))
+    except (OSError, json.JSONDecodeError):
+        # A verdict that cannot be read is not a verdict. Returning empty routes this into
+        # the ordinary "not approved" path, where the node fails or the draft passes per
+        # `on_max_rounds` — rather than raising out of `run_loop` as an unhandled exception
+        # and losing every round already paid for.
+        return {}
     return data if isinstance(data, dict) else {}
 
 
@@ -523,7 +554,7 @@ def _assemble_loop_output(
     """Assemble ``steps/<id>/_out/<outName>.<ext>`` from the chosen body round (§10.3)."""
     out_dir = ctx.run_dir / "steps" / node.id / "_out"
     if out_dir.exists():
-        shutil.rmtree(out_dir)
+        shutil.rmtree(long_path(out_dir))
     out_dir.mkdir(parents=True, exist_ok=True)
     last_name = node.body_block_name(len(node.body_chain) - 1)
     body_out = ctx.run_dir / "steps" / node.id / f"{last_name}_r{chosen}" / "output"
@@ -674,7 +705,7 @@ def _assemble_select_output(
     """Assemble ``steps/<id>/_out/out.<ext>`` from the winner element (§10.3)."""
     out_dir = ctx.run_dir / "steps" / node.id / "_out"
     if out_dir.exists():
-        shutil.rmtree(out_dir)
+        shutil.rmtree(long_path(out_dir))
     out_dir.mkdir(parents=True, exist_ok=True)
     inner = _select_inner_type(ctx, node)
     rtype = ctx.registry.get(inner) if inner else None

@@ -59,7 +59,7 @@ class LoopParams(RetryParams):
     # Counted on the number of items, not on their text: the same count with different
     # wording is still a loop that is not closing anything, and comparing texts would make
     # a reworded remark look like progress.
-    plateau_rounds: int | None = 2
+    plateau_rounds: int | None = Field(default=2, ge=1)
     model: str | None = None
     cache: bool = False
 

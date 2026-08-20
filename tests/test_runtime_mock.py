@@ -24,7 +24,8 @@ def _spec(workdir: Path, step_id: str = "extract:rfp-doc") -> StepSpec:
         workdir=workdir,
         prompt="task prompt",
         system_prompt="system prompt",
-        needs=["read"],
+        env=[],
+            needs=["read"],
         timeout_s=3600,
     )
 

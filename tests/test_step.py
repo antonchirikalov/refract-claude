@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import json
 from pathlib import Path
 
@@ -944,3 +945,143 @@ class TestRetryEditsRatherThanRewrites:
         """An empty output is not a draft to edit; offering it is worse than nothing."""
         plan = self._run(tmp_path, registry, [{}, {"doc.md": LONG_DOC}])
         assert not (plan.workdir / "input" / "_rejected").exists()
+
+
+class TestDeclaredEnvReachesTheSubprocess:
+    """The positive path, end to end.
+
+    Its absence is exactly how a blocker shipped: `env` was added to the contract, honoured
+    by `step_env`, and never put on the `StepSpec`, so `plan.agent.env` was read nowhere.
+    The existing tests only asserted the negative — that undeclared secrets do NOT leak —
+    which a permanently empty list satisfies perfectly.
+    """
+
+    def test_a_declared_variable_is_on_the_spec_and_survives_step_env(
+        self, tmp_path: Path, registry: ArtifactRegistry, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from refract.models.config import McpFile
+        from refract.runtime.claude_code import step_env
+
+        monkeypatch.setenv("REFRACT_TEST_TOOL_BIN", "C:/tool/bin.exe")
+        monkeypatch.setenv("REFRACT_TEST_UNDECLARED", "secret")
+
+        agent = _agent()
+        agent = agent.model_copy(update={"env": ["REFRACT_TEST_TOOL_BIN"]})
+        plan = _plan(tmp_path, registry, agent)
+        seen: dict[str, list[str]] = {}
+
+        class _Capture:
+            async def run_step(self, spec, on_event):  # noqa: ANN001
+                seen["env"] = list(spec.env)
+                (spec.workdir / "output").mkdir(parents=True, exist_ok=True)
+                (spec.workdir / "output" / "doc.md").write_text(
+                    "# Doc\n\n" + "x" * 100, encoding="utf-8"
+                )
+                return StepResult(completed=True)
+
+            async def close(self) -> None:
+                return None
+
+        asyncio.run(
+            execute_agent_step(plan, _Capture(), _ledger(tmp_path, ["write"]), sleeper=_no_sleep)
+        )
+        # the contract's declaration reached the runtime...
+        assert seen["env"] == ["REFRACT_TEST_TOOL_BIN"]
+        # ...and the runtime's allow-list lets it through while still holding the line
+        env = step_env(dict(os.environ), needs=agent.needs, mcp=McpFile(), declared=seen["env"])
+        assert env["REFRACT_TEST_TOOL_BIN"] == "C:/tool/bin.exe"
+        assert "REFRACT_TEST_UNDECLARED" not in env
+
+
+class TestRejectedIsACopyNotALink:
+    """The archive is the one thing in a step that must not change (I2).
+
+    `link_or_copy` prefers a symlink, and a symlink here points into
+    `attempts/<n>/output/` — inside the workdir, so the guard permits writing through it.
+    An agent that edits in place instead of copying would rewrite the record of what the
+    gate rejected while leaving `output/` empty.
+    """
+
+    def _twice(self, tmp_path: Path, registry: ArtifactRegistry) -> AgentStepPlan:
+        plan = _plan(
+            tmp_path,
+            registry,
+            _agent(),
+            gate_rules=[MinLengthRule(rule="min_length", value=500)],
+        )
+        runtime = MockRuntime(
+            {
+                "*": [
+                    ScriptedResponse(files={"doc.md": "# Doc\n\n" + "short " * 5}),
+                    ScriptedResponse(files={"doc.md": "# Doc\n\n" + "long " * 200}),
+                ]
+            }
+        )
+        asyncio.run(
+            execute_agent_step(plan, runtime, _ledger(tmp_path, ["write"]), sleeper=_no_sleep)
+        )
+        return plan
+
+    def test_the_rejected_input_is_not_a_symlink(
+        self, tmp_path: Path, registry: ArtifactRegistry
+    ) -> None:
+        plan = self._twice(tmp_path, registry)
+        landed = plan.workdir / "input" / "_rejected" / "doc.md"
+        assert landed.exists()
+        assert not landed.is_symlink()
+
+    def test_editing_the_rejected_input_cannot_touch_the_archive(
+        self, tmp_path: Path, registry: ArtifactRegistry
+    ) -> None:
+        plan = self._twice(tmp_path, registry)
+        landed = plan.workdir / "input" / "_rejected" / "doc.md"
+        archived = plan.workdir / "attempts" / "1" / "output" / "doc.md"
+        before = archived.read_text("utf-8")
+        landed.write_text("an agent edited this in place", encoding="utf-8")
+        assert archived.read_text("utf-8") == before
+
+    def test_the_archive_records_what_that_attempt_was_handed(
+        self, tmp_path: Path, registry: ArtifactRegistry
+    ) -> None:
+        """I9: attempt 3's `prompt.md` names a directory attempt 4 overwrites."""
+        plan = self._twice(tmp_path, registry)
+        # attempt 1 had no rejected input, so no manifest; a later one would
+        assert not (plan.workdir / "attempts" / "1" / "rejected_inputs.txt").exists()
+
+
+class TestRetryContextSurvivesResume:
+    """A resumed step re-enters with `tries` at 0 and both locals gone, and `_materialize`
+    wipes `input/`. Without rebuilding, the agent writes the artifact again from its
+    sources — the very rewrite this mechanism exists to prevent, on the runs that cost
+    most."""
+
+    def test_the_rejected_document_and_feedback_are_rebuilt(
+        self, tmp_path: Path, registry: ArtifactRegistry
+    ) -> None:
+        rules = [MinLengthRule(rule="min_length", value=500)]
+        short = "# Doc\n\n" + "short " * 5
+
+        # first run: one failed attempt, then the step dies on infra so nothing is done
+        plan = _plan(tmp_path, registry, _agent(), gate_rules=rules, gate_retries=0)
+        runtime = MockRuntime({"*": [ScriptedResponse(files={"doc.md": short})]})
+        asyncio.run(
+            execute_agent_step(plan, runtime, _ledger(tmp_path, ["write"]), sleeper=_no_sleep)
+        )
+        # gate_retries=0, so the attempt is NOT archived: archiving happens at the start
+        # of the next iteration, and there was none. It sits in the workdir root, which is
+        # exactly the shape an interrupted retry leaves behind.
+        assert (plan.workdir / "output" / "doc.md").read_text("utf-8") == short
+        assert (plan.workdir / "gate_report.json").exists()
+
+        # resume: same workdir, fresh call, and the retry context comes off disk
+        plan2 = _plan(tmp_path, registry, _agent(), gate_rules=rules)
+        runtime2 = MockRuntime(
+            {"*": [ScriptedResponse(files={"doc.md": "# Doc\n\n" + "long " * 200})]}
+        )
+        asyncio.run(
+            execute_agent_step(plan2, runtime2, _ledger(tmp_path, ["write2"]), sleeper=_no_sleep)
+        )
+        prompt = (plan2.workdir / "prompt.md").read_text("utf-8")
+        assert "input/_rejected" in prompt, "the resumed step started from scratch"
+        assert "min_length 500" in prompt, "the feedback was not rebuilt from the archive"
+        assert (plan2.workdir / "input" / "_rejected" / "doc.md").read_text("utf-8") == short

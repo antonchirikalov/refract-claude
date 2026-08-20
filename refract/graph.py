@@ -9,6 +9,7 @@ resolvability → §16 constraints → security warnings.
 
 from __future__ import annotations
 
+import os
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -977,9 +978,12 @@ class _Validator:
         external tool starts without its configuration, and that surfaces as a stack trace
         three retries deep. Measured on the figure step: two runs lost every attempt that
         way before anyone looked at the environment.
-        """
-        import os
 
+        NOT HERMETIC, deliberately: this is the one check that reads the environment of
+        whoever runs `validate`, so its result depends on the shell. That is the point —
+        the question is whether the variable will be there when the run starts — but it
+        means tests of this path must set or clear the variable themselves.
+        """
         for node_id, node in self.nodes.items():
             for ref in self._node_agent_refs(node):
                 spec = self.agent(ref)
