@@ -5,3 +5,9 @@ Your previous attempt failed output validation. Fix these problems and try again
 ```
 {{ report }}
 ```
+{% if rejected_dir %}
+That attempt is in `{{ rejected_dir }}/`. Start from it: copy it to your output and edit
+what the report names. Do not write the artifact again from its sources — the problems
+above are about this document, and rewriting it loses everything that was already right
+while costing a full attempt.
+{% endif %}

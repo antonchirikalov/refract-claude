@@ -66,6 +66,7 @@ def build_task_prompt(
     revision: RevisionContext | None = None,
     gate_feedback: str | None = None,
     gate_rules: Sequence[Rule] = (),
+    rejected_dir: str | None = None,
 ) -> str:
     """Assemble the task prompt (SPEC §11 items 2–4) for one step."""
     workdir = Path(workdir)
@@ -83,7 +84,9 @@ def build_task_prompt(
         )
     if gate_feedback is not None:
         sections.append(
-            _env.get_template("gate_feedback.md.j2").render(report=gate_feedback)
+            _env.get_template("gate_feedback.md.j2").render(
+                report=gate_feedback, rejected_dir=rejected_dir
+            )
         )
     return "\n".join(s.strip("\n") for s in sections if s.strip()) + "\n"
 

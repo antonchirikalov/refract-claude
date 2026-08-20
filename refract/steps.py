@@ -218,6 +218,26 @@ def _materialize(inputs: list[InputSpec], input_root: Path) -> None:
             link_or_copy(spec.src, dst)
 
 
+def _rejected_input(workdir: Path, archived: int) -> str | None:
+    """Link the archived attempt's ``output/`` in as ``input/_rejected/`` (SPEC §10.2).
+
+    A gate retry is an EDIT, not a fresh start: the feedback names what is wrong with a
+    specific document, and the document is the cheapest thing the step already has. It is
+    linked read-only in spirit — the agent writes its result to ``output/`` as always, and
+    the archive stays untouched as the record of what was rejected.
+    """
+    src = workdir / "attempts" / str(archived) / "output"
+    if not src.is_dir() or not any(src.iterdir()):
+        return None
+    dst = workdir / "input" / "_rejected"
+    if dst.exists():
+        shutil.rmtree(long_path(dst))
+    dst.mkdir(parents=True, exist_ok=True)
+    for child in sorted(src.iterdir()):
+        link_or_copy(child, dst / child.name)
+    return "input/_rejected"
+
+
 def _archive_attempt(workdir: Path, n: int) -> None:
     """Move the completed attempt's artifacts to ``attempts/<n>/`` (SPEC §10.2)."""
     dest = workdir / "attempts" / str(n)
@@ -284,7 +304,11 @@ async def execute_agent_step(
 
     input_root.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
-    _materialize(plan.inputs, input_root)  # inputs are immutable across gate retries
+    # Built once: the declared inputs are the same for every gate attempt. A retry adds
+    # one thing to the tree — `input/_rejected/`, the attempt the gate just refused — the
+    # same way a loop round adds `input/_previous/`. It is added AFTER this call, so
+    # rebuilding here would wipe it.
+    _materialize(plan.inputs, input_root)
 
     gate_ports = _gate_ports(plan.agent, plan.registry, plan.gate_rules)
     system_prompt = _system_prompt(plan.agent_dir)
@@ -417,12 +441,22 @@ async def execute_agent_step(
     # count reached before the terminal failure (0 if it never completed a run).
     tries = 0
     gate_feedback: str | None = None
+    rejected: str | None = None
     while True:
         if tries > 0:  # gate retry: archive the prior completed attempt first
             # allocate the next free slot, not `tries` — a HITL answer-resume may
             # have already consumed attempts/1 for the parked question turn.
-            _archive_attempt(workdir, _next_attempt(workdir))
+            archived = _next_attempt(workdir)
+            _archive_attempt(workdir, archived)
             output_dir.mkdir(parents=True, exist_ok=True)
+            # Hand the REJECTED attempt back as an input. Archiving moved `output/` away,
+            # so without this the agent starts from nothing and writes the document again
+            # from its sources — when the feedback said "remove 456 characters". Measured
+            # on a live article: three attempts at one step cost $11.00 of which $9.17 was
+            # spent re-composing 11 000 characters that were already almost right, and the
+            # feedback is worded as an edit ("this revision must end shorter than it
+            # started") which is unanswerable if there is nothing to shorten.
+            rejected = _rejected_input(workdir, archived)
 
         task_prompt = build_task_prompt(
             agent=plan.agent,
@@ -430,6 +464,7 @@ async def execute_agent_step(
             workdir=workdir,
             revision=plan.revision,
             gate_feedback=gate_feedback,
+            rejected_dir=rejected,
             gate_rules=plan.gate_rules,
         )
         if hitl_context is not None:

@@ -877,3 +877,70 @@ class TestUsageAccounting:
         assert state.usage is not None
         assert state.usage.calls == 1
         assert state.usage.cost_usd == 0.0
+
+
+# --- a gate retry edits the rejected attempt, it does not start over ----------
+#
+# Measured on a live article: three attempts at one writing step cost $11.00, of which
+# $9.17 was spent re-composing eleven thousand characters that were already almost right.
+# Archiving moves `output/` away, so the agent had nothing to edit — while the feedback was
+# worded as an edit ("this revision must end shorter than it started").
+
+SHORT_DOC = "# Doc\n\n" + "short " * 5
+LONG_DOC = "# Doc\n\n" + "long " * 200
+
+
+class TestRetryEditsRatherThanRewrites:
+    def _run(
+        self, tmp_path: Path, registry: ArtifactRegistry, files: list[dict]
+    ) -> AgentStepPlan:
+        plan = _plan(
+            tmp_path,
+            registry,
+            _agent(),
+            gate_rules=[MinLengthRule(rule="min_length", value=500)],
+        )
+        runtime = MockRuntime({"*": [ScriptedResponse(files=f) for f in files]})
+        asyncio.run(
+            execute_agent_step(
+                plan, runtime, _ledger(tmp_path, ["write"]), sleeper=_no_sleep
+            )
+        )
+        return plan
+
+    def test_the_rejected_attempt_comes_back_as_an_input(
+        self, tmp_path: Path, registry: ArtifactRegistry
+    ) -> None:
+        plan = self._run(
+            tmp_path, registry, [{"doc.md": SHORT_DOC}, {"doc.md": LONG_DOC}]
+        )
+        prompt = (plan.workdir / "prompt.md").read_text("utf-8")
+        assert "input/_rejected" in prompt
+        assert "Start from it" in prompt
+        landed = plan.workdir / "input" / "_rejected" / "doc.md"
+        assert landed.read_text("utf-8") == SHORT_DOC
+
+    def test_the_archive_still_holds_what_was_rejected(
+        self, tmp_path: Path, registry: ArtifactRegistry
+    ) -> None:
+        """The linked copy is for editing; the archive stays the record (SPEC §10.2)."""
+        plan = self._run(
+            tmp_path, registry, [{"doc.md": SHORT_DOC}, {"doc.md": LONG_DOC}]
+        )
+        archived = plan.workdir / "attempts" / "1" / "output" / "doc.md"
+        assert archived.read_text("utf-8") == SHORT_DOC
+
+    def test_the_first_attempt_has_no_rejected_input(
+        self, tmp_path: Path, registry: ArtifactRegistry
+    ) -> None:
+        """Nothing was rejected yet, so nothing must be offered as one."""
+        plan = self._run(tmp_path, registry, [{"doc.md": LONG_DOC}])
+        assert not (plan.workdir / "input" / "_rejected").exists()
+        assert "input/_rejected" not in (plan.workdir / "prompt.md").read_text("utf-8")
+
+    def test_an_attempt_that_produced_nothing_is_not_offered_back(
+        self, tmp_path: Path, registry: ArtifactRegistry
+    ) -> None:
+        """An empty output is not a draft to edit; offering it is worse than nothing."""
+        plan = self._run(tmp_path, registry, [{}, {"doc.md": LONG_DOC}])
+        assert not (plan.workdir / "input" / "_rejected").exists()
