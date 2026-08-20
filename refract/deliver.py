@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from refract.artifacts import (
+    UNRESOLVED_FILENAME,
     artifact_filename,
     link_or_copy,
     long_path,
@@ -57,10 +58,7 @@ class DeliveryReport:
         return lines
 
 
-# Underscore-prefixed so it cannot collide with a declared output: port names
-# (and therefore delivery names) cannot start with one, so `unresolved: ...` in a
-# pipeline gets `unresolved.md` and the engine's own report stays separate.
-UNRESOLVED_FILENAME = "_unresolved.md"
+
 
 
 def _deliver_unresolved(run_dir: Path, out_dir: Path, report: DeliveryReport) -> None:

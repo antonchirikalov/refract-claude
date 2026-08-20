@@ -5,6 +5,14 @@ name: requirements_to_design
 # read the requirements — and fix them — before any design work starts.
 checkpoints: [refine]
 
+# WHAT THE RUN IS FOR (SPEC §22). Without this the two documents the pipeline exists to
+# produce stay buried in `steps/<node>/_out/`, and a live run ended with an empty `output/`
+# beside a run tree of 40 steps. The requirements go first because they are what the client
+# signs; the design is what gets built from them.
+outputs:
+  requirements: refine.doc
+  design: sd_refine.design
+
 nodes:
   # Why one pipeline instead of the separate `extract` + `solution_design` templates:
   # the design nodes read the requirements straight from the node that produced them,

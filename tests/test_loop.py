@@ -15,6 +15,7 @@ from pathlib import Path
 
 import yaml
 
+from refract.artifacts import UNRESOLVED_FILENAME
 from refract.events import EventWriter
 from refract.graph import load_agents
 from refract.models.ledger import NodeStatus, RunStatus, StepStatus
@@ -715,7 +716,7 @@ def _verdict_with(v: str, issues: list[dict]) -> str:
 
 
 def _unresolved(run_dir: Path) -> Path:
-    return run_dir / "steps" / "refine" / "_out" / "unresolved.md"
+    return run_dir / "steps" / "refine" / "_out" / UNRESOLVED_FILENAME
 
 
 def test_open_items_are_written_when_rounds_run_out(tmp_path: Path) -> None:

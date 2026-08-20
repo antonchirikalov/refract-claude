@@ -28,6 +28,14 @@ from refract.registry import ResolvedType, apply_rules, measure_rules
 # --- the single linking helper (SPEC §10; Windows symlink fallback) --------
 
 
+# The loop's open-items report (SPEC §10.3.1). Underscore-prefixed so it cannot collide
+# with a declared output: port names cannot start with one. Defined HERE, in the module both
+# the writer (metanodes) and the reader (deliver) already import, because it was defined
+# twice and the two drifted — a live run wrote `unresolved.md` while delivery looked for
+# `_unresolved.md`, so the report existed in the step and never reached the deliverable.
+UNRESOLVED_FILENAME = "_unresolved.md"
+
+
 def long_path(path: Path | str) -> str:
     """A form of ``path`` the Windows APIs accept past the 260-character limit.
 

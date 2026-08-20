@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from refract.artifacts import (
+    UNRESOLVED_FILENAME,
     artifact_filename,
     artifact_path,
     link_or_copy,
@@ -544,7 +545,7 @@ def _write_unresolved(
         note = str(item.get("note") or "").strip()
         lines.append(f"{n}. " + (f"[{section}] {note}" if section else note))
     body = head + "\n\n".join(lines) + "\n"
-    (out_dir / "unresolved.md").write_text(body, "utf-8")
+    (out_dir / UNRESOLVED_FILENAME).write_text(body, "utf-8")
     return len(items)
 
 
