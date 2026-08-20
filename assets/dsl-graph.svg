@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 520" width="1240" height="520"
+     role="img" aria-label="Граф конвейера: обход папки, извлечение по документу на агента, петля писателя и критика с остановкой на выверку, проектирование на двух моделях, выбор победителя; на связях указаны типы артефактов">
+  <style>
+    .bg    { fill: #fbfaf7; }
+    .node  { fill: #ffffff; stroke: #9aa7bd; stroke-width: 2; }
+    .plain { fill: #f4f2ee; stroke: #cfcbc2; stroke-width: 2; }
+    .box   { fill: #ffffff; stroke: #b9c2d0; stroke-width: 1.6; }
+    .h     { font: 600 26px "Segoe UI", system-ui, "DejaVu Sans", sans-serif; fill: #1f1e1b; }
+    .id    { font: 600 18px "Segoe UI", system-ui, "DejaVu Sans", sans-serif; fill: #1f1e1b; }
+    .kind  { font: 13px "Segoe UI", system-ui, "DejaVu Sans", sans-serif; fill: #6b6257; }
+    .inner { font: 13px ui-monospace, Consolas, monospace; fill: #2c3444; }
+    .type  { font: 12px ui-monospace, Consolas, monospace; fill: #3f7a5a; }
+    .note  { font: 14px "Segoe UI", system-ui, "DejaVu Sans", sans-serif; fill: #6b6257; }
+    .flag  { font: 13px "Segoe UI", system-ui, "DejaVu Sans", sans-serif; fill: #a2701c; }
+    .edge  { stroke: #6f6a61; stroke-width: 2.2; fill: none; marker-end: url(#a); }
+    .back  { stroke: #8c7ab5; stroke-width: 2.2; fill: none; stroke-dasharray: 7 5;
+             marker-end: url(#p); }
+    .round { stroke: #6f6a61; stroke-width: 2; fill: none; marker-end: url(#a); }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+            orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6f6a61"/></marker>
+    <marker id="p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+            orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8c7ab5"/></marker>
+  </defs>
+
+  <rect class="bg" width="1240" height="520"/>
+  <text class="h"    x="40" y="46">Конвейер из примера как граф</text>
+  <text class="note" x="40" y="72">Стопка карточек — набор: узел развёрнут по элементам.</text>
+  <text class="note" x="40" y="94">Зелёным — тип артефакта на связи; внутри петли им помечен вердикт, по которому берётся раунд.</text>
+
+  <!-- input folder -->
+  <text class="note" x="40" y="222">входная</text>
+  <text class="note" x="40" y="242">папка</text>
+
+  <!-- scan -->
+  <rect class="plain" x="124" y="186" width="140" height="72" rx="10"/>
+  <text class="id"    x="144" y="214">scan</text>
+  <text class="kind"  x="144" y="238">builtin, без модели</text>
+
+  <!-- extract (map) -->
+  <rect class="node" x="356" y="176" width="176" height="88" rx="10"/>
+  <rect class="node" x="350" y="182" width="176" height="88" rx="10"/>
+  <rect class="node" x="344" y="188" width="176" height="88" rx="10"/>
+  <text class="id"   x="362" y="216">extract</text>
+  <text class="kind" x="362" y="238">map: агент на документ</text>
+  <text class="kind" x="362" y="258">workers: 3</text>
+
+  <!-- refine (loop) -->
+  <rect class="node" x="604" y="152" width="244" height="184" rx="12"/>
+  <text class="flag" x="604" y="140">чекпойнт: выверка человеком</text>
+  <text class="id"   x="624" y="182">refine</text>
+  <text class="kind" x="690" y="182">loop, до 3 раундов</text>
+  <rect class="box"  x="624" y="196" width="204" height="44" rx="8"/>
+  <text class="inner" x="638" y="223">requirements_writer</text>
+  <rect class="box"  x="624" y="254" width="204" height="44" rx="8"/>
+  <text class="inner" x="638" y="281">requirements_critic</text>
+  <path class="round" d="M 624 276 C 598 276 598 218 620 218"/>
+  <text class="type" x="624" y="322">verdict@v1</text>
+
+  <!-- design (map_over) -->
+  <rect class="node" x="920" y="164" width="172" height="152" rx="12"/>
+  <text class="id"   x="938" y="192">design</text>
+  <text class="kind" x="938" y="212">map_over: две модели</text>
+  <rect class="box"  x="938" y="224" width="136" height="36" rx="8"/>
+  <text class="inner" x="950" y="248">claude/sonnet</text>
+  <rect class="box"  x="938" y="266" width="136" height="36" rx="8"/>
+  <text class="inner" x="950" y="290">claude/opus</text>
+
+  <!-- choose (select) -->
+  <rect class="node" x="1132" y="186" width="96" height="108" rx="12"/>
+  <text class="id"   x="1146" y="214">choose</text>
+  <text class="kind" x="1146" y="232">select</text>
+  <rect class="box"  x="1144" y="242" width="72" height="34" rx="8"/>
+  <text class="inner" x="1152" y="264">selector</text>
+
+  <!-- edges, with the type label under each link -->
+  <path class="edge" d="M 92 218 H 118"/>
+
+  <path class="edge" d="M 266 218 H 338"/>
+  <text class="type" x="272" y="200">source@v1</text>
+
+  <path class="edge" d="M 528 218 H 598"/>
+  <text class="type" x="534" y="200">extract@v1</text>
+
+  <path class="edge" d="M 850 240 H 914"/>
+  <text class="type" x="850" y="228">requirements@v1</text>
+
+  <path class="edge" d="M 1094 240 H 1126"/>
+  <text class="type" x="1076" y="196">design_doc@v1</text>
+
+  <!-- the long reference: choose judges candidates against requirements two nodes back -->
+  <path class="back" d="M 726 342 V 430 H 1180 V 300"/>
+  <text class="note" x="40" y="466">Пунктиром — ссылка через голову соседа: селектор судит кандидатов против требований,</text>
+  <text class="note" x="40" y="490">написанных двумя узлами раньше. Порядок исполнения движок выводит из таких ссылок сам.</text>
+</svg>
