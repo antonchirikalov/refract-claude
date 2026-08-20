@@ -858,3 +858,147 @@ def test_a_verdict_without_issues_is_not_a_crash(tmp_path: Path) -> None:
     )
     assert status is RunStatus.completed
     assert not _unresolved(run_dir).exists()
+
+
+# --- plateau: stop when the count stops falling (SPEC §10.3) ------------------
+#
+# `max_rounds` alone cannot tell a converging loop from a stalled one. Measured on two live
+# runs of one article: 6, 2, 2 open items and 5, 5, 5, 4 — the extra round in the second
+# bought one item for the price of a full round, and no round was ever approved.
+
+
+def _plateau_pipeline(*, max_rounds: int, plateau_rounds: int | None) -> Pipeline:
+    params: dict = {
+        "max_rounds": max_rounds,
+        "on_max_rounds": "pass",
+        "model": "kimi/kimi-k3",
+    }
+    if plateau_rounds is not None:
+        params["plateau_rounds"] = plateau_rounds
+    else:
+        params["plateau_rounds"] = None
+    return Pipeline.model_validate(
+        {
+            "version": "0.1",
+            "name": "refine",
+            "nodes": [
+                {
+                    "id": "refine",
+                    "type": "loop",
+                    "params": params,
+                    "body": {"agent": "writer@1"},
+                    "critic": {"agent": "critic@1", "inputs": {"draft": "@body"}},
+                    "outputs": {"doc": "@body"},
+                }
+            ],
+        }
+    )
+
+
+def _n_issues(n: int) -> str:
+    return json.dumps(
+        {"verdict": "revise", "issues": [{"note": f"пункт {i}"} for i in range(n)]}
+    )
+
+
+def _scenario(counts: list[int]) -> dict:
+    out: dict = {}
+    for r, n in enumerate(counts, 1):
+        out[f"refine.body:r{r}"] = [ScriptedResponse(files={"doc.md": DOC1})]
+        out[f"refine.critic:r{r}"] = [ScriptedResponse(files={"verdict.json": _n_issues(n)})]
+    return out
+
+
+def test_two_rounds_without_improvement_stop_the_loop(tmp_path: Path) -> None:
+    """5, 5, 5 — the third round is not bought."""
+    _, agents, reg = _library(tmp_path)
+    status, ledger, run_dir = _run(
+        tmp_path,
+        _plateau_pipeline(max_rounds=5, plateau_rounds=2),
+        agents,
+        reg,
+        _scenario([5, 5, 5]),
+    )
+    assert status is RunStatus.completed
+    assert "refine.critic:r3" in ledger.state.steps
+    assert "refine.body:r4" not in ledger.state.steps, "round 4 was bought on a plateau"
+    events = (run_dir / "events.jsonl").read_text("utf-8")
+    assert "plateau" in events
+    assert "round(s) unspent" in events
+
+
+def test_a_falling_count_keeps_buying_rounds(tmp_path: Path) -> None:
+    """6, 5, 4 is converging: the detector must not fire."""
+    _, agents, reg = _library(tmp_path)
+    _status, ledger, _run_dir = _run(
+        tmp_path,
+        _plateau_pipeline(max_rounds=3, plateau_rounds=2),
+        agents,
+        reg,
+        _scenario([6, 5, 4]),
+    )
+    assert "refine.critic:r3" in ledger.state.steps
+
+
+def test_one_bad_round_is_noise_not_a_plateau(tmp_path: Path) -> None:
+    """5, 5, 3: the count recovers, so the loop must still be running at round 3."""
+    _, agents, reg = _library(tmp_path)
+    _status, ledger, _run_dir = _run(
+        tmp_path,
+        _plateau_pipeline(max_rounds=3, plateau_rounds=3),
+        agents,
+        reg,
+        _scenario([5, 5, 3]),
+    )
+    assert "refine.critic:r3" in ledger.state.steps
+
+
+def test_the_plateau_takes_the_best_round_not_the_last(tmp_path: Path) -> None:
+    """The whole point of counting is that the last round is not the best one."""
+    _, agents, reg = _library(tmp_path)
+    scenario = {
+        "refine.body:r1": [ScriptedResponse(files={"doc.md": DOC1})],
+        "refine.body:r2": [ScriptedResponse(files={"doc.md": DOC2})],
+        "refine.body:r3": [ScriptedResponse(files={"doc.md": DOC3})],
+        "refine.critic:r1": [ScriptedResponse(files={"verdict.json": _n_issues(5)})],
+        "refine.critic:r2": [ScriptedResponse(files={"verdict.json": _n_issues(2)})],
+        "refine.critic:r3": [ScriptedResponse(files={"verdict.json": _n_issues(4)})],
+    }
+    # r2 is the best (2 items); r3 and r4 fail to beat it, so the loop stops and must
+    # hand on r2's draft, not the newest one
+    scenario["refine.body:r4"] = [ScriptedResponse(files={"doc.md": DOC1})]
+    scenario["refine.critic:r4"] = [
+        ScriptedResponse(files={"verdict.json": _n_issues(4)})
+    ]
+    _status, _ledger, run_dir = _run(
+        tmp_path, _plateau_pipeline(max_rounds=6, plateau_rounds=2), agents, reg, scenario
+    )
+    assembled = (run_dir / "steps" / "refine" / "_out" / "doc.md").read_text("utf-8")
+    assert assembled == DOC2, "the plateau shipped a round that was not the best"
+
+
+def test_the_detector_can_be_switched_off(tmp_path: Path) -> None:
+    """`plateau_rounds: null` spends the whole budget, for a caller who wants that."""
+    _, agents, reg = _library(tmp_path)
+    _status, ledger, _run_dir = _run(
+        tmp_path,
+        _plateau_pipeline(max_rounds=3, plateau_rounds=None),
+        agents,
+        reg,
+        _scenario([5, 5, 5]),
+    )
+    assert "refine.critic:r3" in ledger.state.steps
+
+
+def test_an_approval_beats_the_plateau(tmp_path: Path) -> None:
+    """A loop that gets approved stops for the better reason."""
+    _, agents, reg = _library(tmp_path)
+    scenario = _scenario([5, 5])
+    scenario["refine.critic:r2"] = [
+        ScriptedResponse(files={"verdict.json": _verdict("approved")})
+    ]
+    status, ledger, _run_dir = _run(
+        tmp_path, _plateau_pipeline(max_rounds=4, plateau_rounds=2), agents, reg, scenario
+    )
+    assert status is RunStatus.completed
+    assert "refine.body:r3" not in ledger.state.steps

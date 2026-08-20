@@ -46,6 +46,20 @@ class LoopParams(RetryParams):
 
     max_rounds: int = 3
     on_max_rounds: Literal["pass", "fail"] = "pass"
+    # How many rounds may fail to beat the fewest open items any round has managed before
+    # the loop stops buying more. `None` disables the check and spends the whole budget.
+    #
+    # Two, because one bad round is noise and two in a row is a plateau. Measured on two
+    # live runs of one article: 6, 2, 2 open items and 5, 5, 5, 4 — in the second the extra
+    # round bought one item for the price of a full round, and no round was ever approved.
+    # A strong critic reading eleven thousand characters of technical prose finds about five
+    # things every time, so "the critic falls silent" is close to unreachable for that
+    # genre and `max_rounds` alone cannot tell a converging loop from a stalled one.
+    #
+    # Counted on the number of items, not on their text: the same count with different
+    # wording is still a loop that is not closing anything, and comparing texts would make
+    # a reworded remark look like progress.
+    plateau_rounds: int | None = 2
     model: str | None = None
     cache: bool = False
 

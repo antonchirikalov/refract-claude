@@ -98,12 +98,11 @@ nodes:
     # reviewer, not a measure of the draft, and `verdict == approved` is therefore close to
     # unreachable for this genre however many rounds are bought.
     #
-    # So the ceiling stays small, and the two things that would actually close this are not
-    # rounds: a plateau detector (stop when the count stops falling) and an unresolved report
-    # (ship with the open items named, which was always the designed outcome for remarks a
-    # round cannot close). Until those exist, `on_max_rounds: pass` lets the draft through
-    # and what is still open lives only in the run tree.
-    params: { max_rounds: 4 }
+    # So the ceiling is not what limits this loop, and both things that do are now the
+    # engine's: `plateau_rounds` stops paying once the count stops falling (§10.3.2), and
+    # the loop writes what it could not close into `unresolved.md`, which travels with the
+    # deliverable (§10.3.1). The ceiling is a budget, not the acceptance criterion.
+    params: { max_rounds: 4, plateau_rounds: 2 }
     body:
       # A CHAIN, not one agent, and the order inside it is the order of what cannot be
       # judged by reading. The writer states the mechanism and works the example. The

@@ -161,6 +161,13 @@ async def run_loop(node: LoopNode, ctx: MetaContext) -> NodeStatus:
     ctx.set_node(node.id, NodeStatus.running)
 
     approved_round: int | None = None
+    plateau_round: int | None = None
+    # The fewest open items any round has managed, and how many rounds have failed to beat
+    # it. Derived here rather than stored: the ledger holds the verdicts, this is arithmetic
+    # over them.
+    best_open = 1 << 30
+    best_round = 1
+    since_best = 0
     last_round = 0
     for r in range(1, node.params.max_rounds + 1):
         last_round = r
@@ -223,8 +230,38 @@ async def run_loop(node: LoopNode, ctx: MetaContext) -> NodeStatus:
             approved_round = r
             break
 
+        # Plateau: a round that did not beat the fewest open items any round has managed.
+        # Two in a row and the loop stops — one bad round is noise, two is a shape. The
+        # draft still passes on and its open items are still reported; this only declines
+        # to pay for a third answer that is not getting shorter.
+        open_now = len(_verdict_issues(ctx, node, critic_agent, r))
+        if open_now < best_open:
+            best_open, best_round, since_best = open_now, r, 0
+        else:
+            since_best += 1
+            _warn(
+                ctx,
+                node.id,
+                f"round {r}: {open_now} open item(s), no better than {best_open} "
+                f"at round {best_round} ({since_best} in a row without improvement)",
+            )
+        limit = node.params.plateau_rounds
+        if limit is not None and since_best >= limit:
+            plateau_round = r
+            _warn(
+                ctx,
+                node.id,
+                f"plateau: {since_best} round(s) without improving on {best_open} "
+                f"open item(s); stopping with {node.params.max_rounds - r} round(s) unspent",
+            )
+            break
+
     if approved_round is not None:
         chosen = approved_round
+    elif plateau_round is not None:
+        # The loop stopped itself. Take the best round rather than the last: the point of
+        # counting was that the last one is not the best.
+        chosen = best_round
     elif node.params.on_max_rounds == "fail":
         return _fail(
             ctx, node.id, f"loop: {node.params.max_rounds} rounds without approval"
@@ -422,6 +459,16 @@ def _read_verdict(
     return str(_verdict_data(ctx, node, critic_agent, r).get("verdict"))
 
 
+def _verdict_issues(
+    ctx: MetaContext, node: LoopNode, critic_agent: AgentSpec, r: int
+) -> list[dict[str, object]]:
+    """The round's remarks, as a list (I4). Absent or malformed reads as none."""
+    issues = _verdict_data(ctx, node, critic_agent, r).get("issues")
+    if not isinstance(issues, list):
+        return []
+    return [i for i in issues if isinstance(i, dict)]
+
+
 def _write_unresolved(
     ctx: MetaContext,
     node: LoopNode,
@@ -447,9 +494,7 @@ def _write_unresolved(
     A round the critic approved with remarks still gets the file: "publishable, but this is
     wrong" is a finding, and silence about it reads as approval of everything.
     """
-    data = _verdict_data(ctx, node, critic_agent, chosen)
-    issues = data.get("issues")
-    items = [i for i in issues if isinstance(i, dict)] if isinstance(issues, list) else []
+    items = _verdict_issues(ctx, node, critic_agent, chosen)
     if not items:
         return 0
     out_dir = ctx.run_dir / "steps" / node.id / "_out"
