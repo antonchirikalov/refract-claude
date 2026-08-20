@@ -62,7 +62,7 @@ def _spec(
 
 
 def _runtime() -> ClaudeCodeRuntime:
-    return ClaudeCodeRuntime(providers=ProvidersFile(), mcp=MCP, exe="claude")
+    return ClaudeCodeRuntime(mcp=MCP, exe="claude")
 
 
 class TestModelAlias:

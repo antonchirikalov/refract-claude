@@ -25,8 +25,21 @@ nodes:
     type: loop
     params: { max_rounds: 3 }
     body:
-      agent: requirements_writer@1
-      inputs: { extracts: extract.extract }
+      # A CHAIN: the writer states the requirements, then the fact checker walks them
+      # against the extracts and hands back the same document with the claims corrected.
+      #
+      # The corrector is here rather than left to the critic for the reason the article
+      # pipeline measured: a critic can only REPORT a number with no source behind it, and
+      # reporting it costs a whole revision round, while a corrector settles it inside the
+      # round it appeared in. The agent existed and this template did not use it — README
+      # described this very chain while the library shipped writer-plus-critic alone.
+      #
+      # Only the first element gets the critic's remarks (SPEC §10.3); the last element's
+      # output is the round's draft, so the critic judges corrected text.
+      - agent: requirements_writer@1
+        inputs: { extracts: extract.extract }
+      - agent: requirements_fact_checker@1
+        inputs: { draft: "@prev", extracts: extract.extract }
     critic:
       agent: requirements_critic@1
       inputs: { draft: "@body", extracts: extract.extract }

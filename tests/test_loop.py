@@ -71,7 +71,7 @@ def _mk_agent(lib: Path, name: str, consumes: list[dict], produces: list[dict]) 
     (d / "prompt.md").write_text(f"You are {name}.", encoding="utf-8")
 
 
-def _library(tmp_path: Path, *, critic_gate_retries: int | None = None) -> tuple:
+def _library(tmp_path: Path) -> tuple:
     lib = tmp_path / "library"
     (lib / "types" / "schemas").mkdir(parents=True)
     (lib / "types" / "artifact_types.yaml").write_text(_TYPES, encoding="utf-8")

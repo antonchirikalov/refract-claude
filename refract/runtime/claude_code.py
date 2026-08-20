@@ -30,7 +30,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from refract.models.config import McpFile, McpHttpServer, McpStdioServer, ProvidersFile
+from refract.models.config import McpFile, McpHttpServer, McpStdioServer
 from refract.runtime.base import EventCallback, StepResult, StepSpec
 
 # Windows ships the CLI as a .cmd shim; asyncio needs the exact name.
@@ -369,18 +369,24 @@ def is_transient(message: str) -> bool:
 
 
 class ClaudeCodeRuntime:
-    """Runs each step as one ``claude -p`` process (SPEC §12)."""
+    """Runs each step as one ``claude -p`` process (SPEC §12).
+
+    Takes no provider configuration, and that absence is the point: in this fork the CLI
+    authenticates from its own subscription, so there is no key to look up and no model
+    catalogue to consult here. Provider data belongs to the parts that use it — the
+    scheduler's per-provider concurrency limits and the validator's model resolution.
+    The constructor used to accept ``providers`` and store it unread, which promised a
+    check this class never performed.
+    """
 
     def __init__(
         self,
         *,
-        providers: ProvidersFile,
         mcp: McpFile,
         exe: str | None = None,
         heartbeat_s: float = 10.0,
         permission_mode: str = "bypassPermissions",
     ) -> None:
-        self._providers = providers
         self._mcp = mcp
         self._exe = exe or DEFAULT_EXE
         self._heartbeat_s = heartbeat_s

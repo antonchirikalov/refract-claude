@@ -300,6 +300,3 @@ def usage_by_node(state: RunState) -> dict[str, Usage]:
             continue
         by_node[step.node] = by_node.get(step.node, Usage()).plus(step.usage)
     return by_node
-
-    def node_ids(self) -> list[str]:
-        return list(self.state.nodes)

@@ -453,7 +453,7 @@ def _default_runtime_factory(app: AppConfig, pipeline: Pipeline) -> AgentRuntime
     """
     from refract.runtime.claude_code import ClaudeCodeRuntime
 
-    return ClaudeCodeRuntime(providers=app.providers, mcp=app.mcp)
+    return ClaudeCodeRuntime(mcp=app.mcp)
 
 
 def _print_errors(errors: Sequence[object]) -> None:

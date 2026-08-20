@@ -259,7 +259,12 @@ _SCENARIOS: dict[str, dict[str, dict[str, str]]] = {
     },
     "requirements_to_design": {
         "extract:*": {"extract.json": _EXTRACT},
-        "refine.body:*": {"requirements.md": _REQ},
+        # the loop body is a CHAIN: the writer, then the fact checker that walks the
+        # claims against the extracts — two step ids per round, not one
+        # filenames match each agent's produce PORT, and the two differ: the writer
+        # produces `requirements`, the fact checker `doc`
+        "refine.body1:*": {"requirements.md": _REQ},
+        "refine.body2:*": {"doc.md": _REQ},
         "refine.critic:*": {"verdict.json": _APPROVED},
         "design:*": {"design_doc.md": _DESIGN},
         "choose.selector": {"choice.json": json.dumps({"winner": "claude_opus"})},
