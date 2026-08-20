@@ -87,13 +87,31 @@ you would have drawn — you brief the tool well and let it work.
      --output-dir figures-work \
      --iterations 2 \
      --vlm-provider claude_code --vlm-model sonnet \
+     --critic-vlm-provider kimi --critic-vlm-model kimi-k3 \
      --image-provider ss_gateway
    ```
 
-   Both model flags are required. `--vlm-provider claude_code` alone does NOT set the
-   model: the tool then takes whatever model its own configuration names, which may
-   belong to a different provider entirely, and the call fails with an API error and
-   zero tokens.
+   Both model flags are required, and so are both critic flags. `--vlm-provider
+   claude_code` alone does NOT set the model: the tool then takes whatever model its own
+   configuration names, which may belong to a different provider entirely, and the call
+   fails with an API error and zero tokens. The same holds for the critic pair — naming
+   the provider without the model leaves it to the tool's config, whose default for that
+   provider is a code model, not the one asked for here.
+
+   The critic is deliberately a DIFFERENT model from the one that planned and styled the
+   figure: a model reviewing its own output grades leniently, which is the one failure
+   this loop exists to catch. `kimi-k3` needs `MOONSHOT_API_KEY` in the environment.
+
+   AND YOU MUST CHECK THAT IT ANSWERED. The tool prints `✓ Critic satisfied` even when
+   the critic never ran — measured twice, once when the model had no permission to open
+   the rendered file and once when the provider returned 429
+   `exceeded_current_quota_error`. Both times a picture was produced and declared
+   reviewed. So read the tool's own log for the run you just made and confirm the critic
+   PRODUCED A VERDICT: a line naming what it looked at, or a request for changes. If all
+   you can find is `RateLimitError`, `RetryError`, a permission complaint or nothing at
+   all, then the figure is unreviewed — say so per figure in your final message and in
+   the manifest, and never report it as checked. A verdict nobody produced is the one
+   thing this stage must not pass on silently.
 
    Never pass an absolute path and never write outside your working directory.
 
