@@ -1,3 +1,37 @@
+# --- what belongs in this repository ----------------------------------------
+#
+# An allow-list of top-level DIRECTORIES, not a list of things to exclude. The reason is
+# that the two failure modes are not symmetric. A directory forgotten here is simply
+# absent from a clone and noticed the first time anyone builds; a run directory that slips
+# in is 250 MB in the history, and history is only fixed by rewriting it.
+#
+# This file used to name each sandbox — claude-demo/, terror-report/, attn-article/,
+# attn-v2/, RESULT/ — one line per live run someone happened to remember. That list grows
+# every time the engine is validated on a new subject, and the cost of forgetting a line
+# is paid once and permanently.
+#
+# Files in the root stay visible on purpose: they are few, they are all product
+# (README, CLAUDE.md, pyproject.toml, uv.lock), and a new one is worth noticing in
+# `git status` rather than hiding.
+/*/
+!/refract/
+!/library/
+!/tests/
+!/examples/
+!/web/
+!/assets/
+!/.claude/
+
+# --- inside the allowed directories -----------------------------------------
+#
+# Run output is never product, wherever it appears — including under examples/, where a
+# developer's own run would otherwise land in the index.
+runs/
+output/
+# scratch a figure tool leaves beside its work
+_render-work/
+figures-work/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -9,47 +43,22 @@ __pycache__/
 # uv / venv
 .venv/
 
-# local sandbox for driving the CLI by hand: a REFRACT_HOME with providers/mcp and a
-# scratch project scaffolded from a template. Environment, not project content.
-.refract-home/
-claude-demo/
-# live-run sandboxes: the projects the engine was validated on (brief + pipeline + the
-# artifacts those runs produced). Same category as claude-demo/ — a workbench, not the
-# product. terror-report/evidence/ keeps the expensive artifacts of six deleted runs.
-tavily-smoke/
-terror-report/
-attn-article/
-
-# refract run outputs
-runs/
-illustrator-sample/
-
 # Local agent permissions: names the MCP servers of THIS machine (including a
 # corporate one), so it is environment config, not project content. The reusable
 # part of .claude/ — the reviewer agents — stays tracked.
 .claude/settings.json
-
-# Internal documents: specs, engine design, roadmap, progress log, ops notes. The repo is
-# public; these are not. README's illustrations live in assets/ instead, so nothing here
-# needs an exception.
-docs/
-# local test-run scratch
-.smoke-home/
-.illus-smoke/
-.pb-cli/
-*.smoke-proj
-.illus-proj
-test-run/
+.claude/settings.local.json
 
 # frontend (SPEC-UI): deps and build output
 web/node_modules/
 web/dist/
-
 web/test-results/
 web/playwright-report/
 
-# IDE scratch that landed in the templates dir by accident
-.idea/
+# IDE scratch
 *.code-workspace
-attn-v2/
-RESULT/
+
+# Internal documents (specs, design write-ups, roadmap, progress log) live in docs/ and
+# the repository is public, so they are excluded by the allow-list above rather than by a
+# rule of their own. README's illustrations are in assets/, which IS allowed, so nothing
+# published needs an exception.
