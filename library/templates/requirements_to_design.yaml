@@ -139,5 +139,9 @@ nodes:
       # carry work orders for figures that have been drawn. A live run of the article
       # pipeline shipped a document whose placeholders were never replaced, and nothing
       # noticed until a person opened it.
-      - { rule: forbid_regex, pattern: 'ILLUSTRATION:', max_hits: 0 }
+      # The PLACEHOLDER, not the word. A live run had the illustrator do everything right
+      # and then explain itself in a note — "each marked with a tag of the form
+      # `ILLUSTRATION: <slug>`" — and this rule failed the step three times over that
+      # sentence. What must be gone is the work order: the HTML comment that opens one.
+      - { rule: forbid_regex, pattern: '<!--\s*ILLUSTRATION:', max_hits: 0 }
       - { rule: min_matches, pattern: '(?m)!\[[^\]]*\]\(illustrations/', value: 1 }
