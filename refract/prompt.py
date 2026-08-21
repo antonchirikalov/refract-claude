@@ -26,6 +26,7 @@ from refract.models.types import (
     ForbidRegexRule,
     MaxLengthRule,
     MinEntriesRule,
+    MinMatchesRule,
     MinLengthRule,
     NoEmptySectionsRule,
     ProseCharsRule,
@@ -327,6 +328,14 @@ def _schema_summary(
             )
         elif isinstance(rule, MinEntriesRule):
             lines.append(f"At least {rule.value} entries in the directory.")
+        elif isinstance(rule, MinMatchesRule):
+            # The pattern is shown as well as the count: a floor of ten means nothing
+            # without saying ten of WHAT, and the pattern is usually readable enough
+            # (`| FR-\d{3} |`) to tell the agent which rows are being counted.
+            lines.append(
+                f"At least {rule.value} lines matching `{rule.pattern}` "
+                "— a floor, not a target."
+            )
         elif isinstance(rule, CitationClosureRule):
             lines.append(
                 f"Every `[n]` reference in the text must resolve to an entry of the "

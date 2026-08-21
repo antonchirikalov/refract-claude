@@ -24,6 +24,8 @@ from refract.scheduler import run_pipeline
 from refract.snapshot import build_resolved
 from refract.state import Ledger
 
+from reqdoc import requirements_doc
+
 LIBRARY = Path(__file__).resolve().parents[1] / "library"
 TEMPLATES = LIBRARY / "templates"
 
@@ -56,7 +58,7 @@ def test_requirements_type_rejects_front_matter(tmp_path: Path) -> None:
     registry = ArtifactRegistry.load(LIBRARY)
     rtype = registry.get("requirements@v1")
     assert rtype is not None
-    body = "# Requirements: T\n\n- FR-1 alpha is testable.\n"
+    body = requirements_doc("T")
     for content, ok in (
         (body, True),
         ("---\nfr_count: 9\n---\n\n" + body, False),
@@ -92,7 +94,7 @@ def test_template_validates(name: str) -> None:
 
 # --- end-to-end execution on MockRuntime (SPEC §17 Phase-1 criterion) --------
 
-_REQ = "# Requirements: T\n- FR-1 alpha\n"
+_REQ = requirements_doc("T")
 # design_doc@v1 now requires a real body and a declared assumptions section (SPEC §5),
 # so the scripted output must clear the same gate a real agent faces
 _DESIGN = (
@@ -103,7 +105,7 @@ _DESIGN = (
 )
 _REPORT = "# Discovery\nOpen questions and unknowns.\n"
 _APPROVED = json.dumps({"verdict": "approved"})
-_EXTRACT = json.dumps({"source": "s", "requirements": [], "trust_level": "low"})
+_EXTRACT = json.dumps({"source": "s", "source_type": "brief", "requirements": [], "trust_level": "low"})
 
 # --- analytic_report fixtures -----------------------------------------------
 # study_note@v1: the minimum a real note must carry to be usable downstream

@@ -21,7 +21,9 @@ from refract.runtime.mock import MockRuntime, ScriptedResponse
 from refract.scheduler import node_dependencies, run_pipeline
 from refract.state import Ledger
 
-DOC = "# Requirements: d\n- FR-1\n"
+from reqdoc import requirements_doc
+
+DOC = requirements_doc("d")
 MODELS = ["kimi/kimi-k3", "openai/gpt-5.6"]
 
 _TYPES = """

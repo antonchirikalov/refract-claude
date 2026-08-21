@@ -25,6 +25,8 @@ from refract.runtime.mock import MockRuntime, ScriptedResponse
 from refract.scheduler import run_pipeline
 from refract.state import Ledger
 
+from reqdoc import requirements_doc
+
 from graph_fixtures import agent_spec, write_registry
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -215,7 +217,7 @@ class TestRerunFromNode:
                 "proc:*": [
                     ScriptedResponse(files={"extract.json": json.dumps({"v": 1})})
                 ],
-                "write": [ScriptedResponse(files={"doc.md": "# Requirements: x\n"})],
+                "write": [ScriptedResponse(files={"doc.md": requirements_doc("x")})],
             }
         )
         status_a, ledger_a, run_a = await _run(
@@ -224,7 +226,7 @@ class TestRerunFromNode:
         assert status_a is RunStatus.completed
         assert ledger_a.get_step("proc:a-txt").outcome is not None
 
-        tracking = _TrackingRuntime({"write": {"doc.md": "# Requirements: y\n"}})
+        tracking = _TrackingRuntime({"write": {"doc.md": requirements_doc("y")}})
         status_b, ledger_b, run_b = await _run(
             tmp_path,
             "run_b",
@@ -266,7 +268,7 @@ class TestMapElementDiffBySourceHash:
                 "proc:*": [
                     ScriptedResponse(files={"extract.json": json.dumps({"v": 1})})
                 ],
-                "write": [ScriptedResponse(files={"doc.md": "# Requirements: x\n"})],
+                "write": [ScriptedResponse(files={"doc.md": requirements_doc("x")})],
             }
         )
         status_a, ledger_a, run_a = await _run(
@@ -277,7 +279,7 @@ class TestMapElementDiffBySourceHash:
         tracking = _TrackingRuntime(
             {
                 "proc:*": {"extract.json": json.dumps({"v": 1})},
-                "write": {"doc.md": "# Requirements: z\n"},
+                "write": {"doc.md": requirements_doc("z")},
             }
         )
         status_b, ledger_b, run_b = await _run(
@@ -320,7 +322,7 @@ class TestTransitiveInvalidation:
                 "proc:*": [
                     ScriptedResponse(files={"extract.json": json.dumps({"v": 1})})
                 ],
-                "write": [ScriptedResponse(files={"doc.md": "# Requirements: x\n"})],
+                "write": [ScriptedResponse(files={"doc.md": requirements_doc("x")})],
             }
         )
         status_a, _, run_a = await _run(
@@ -331,7 +333,7 @@ class TestTransitiveInvalidation:
         tracking = _TrackingRuntime(
             {
                 "proc:*": {"extract.json": json.dumps({"v": 2})},
-                "write": {"doc.md": "# Requirements: w\n"},
+                "write": {"doc.md": requirements_doc("w")},
             }
         )
         status_b, ledger_b, run_b = await _run(
@@ -366,7 +368,7 @@ class TestBuiltinChangePropagation:
                 "proc:*": [
                     ScriptedResponse(files={"extract.json": json.dumps({"v": 1})})
                 ],
-                "write": [ScriptedResponse(files={"doc.md": "# Requirements: x\n"})],
+                "write": [ScriptedResponse(files={"doc.md": requirements_doc("x")})],
             }
         )
         status_a, _, run_a = await _run(
@@ -377,7 +379,7 @@ class TestBuiltinChangePropagation:
         tracking = _TrackingRuntime(
             {
                 "proc:*": {"extract.json": json.dumps({"v": 1})},
-                "write": {"doc.md": "# Requirements: z\n"},
+                "write": {"doc.md": requirements_doc("z")},
             }
         )
         status_b, ledger_b, _ = await _run(
@@ -405,7 +407,7 @@ class TestBuiltinChangePropagation:
                 "proc:*": [
                     ScriptedResponse(files={"extract.json": json.dumps({"v": 1})})
                 ],
-                "write": [ScriptedResponse(files={"doc.md": "# Requirements: x\n"})],
+                "write": [ScriptedResponse(files={"doc.md": requirements_doc("x")})],
             }
         )
         _, _, run_a = await _run(
@@ -454,7 +456,7 @@ class TestRerunImplEndToEnd:
         )
         app = AppConfig(library_path=library_path, providers=providers)
 
-        req = "# Requirements: Demo\n\n- FR-1: the system shall do a thing.\n"
+        req = requirements_doc("Demo")
 
         def _factory_a(app: AppConfig, pipeline: Pipeline) -> MockRuntime:
             return MockRuntime(
@@ -642,7 +644,7 @@ nodes:
             }
         )
         app = AppConfig(library_path=library, providers=providers)
-        req = "# Requirements: Demo\n\n- FR-1: the system shall do a thing.\n"
+        req = requirements_doc("Demo")
 
         def _first(app: AppConfig, pipeline: Pipeline) -> MockRuntime:
             return MockRuntime(
@@ -701,7 +703,7 @@ nodes:
             }
         )
         app = AppConfig(library_path=library, providers=providers)
-        req = "# Requirements: Demo\n\n- FR-1: the system shall do a thing.\n"
+        req = requirements_doc("Demo")
 
         def _first(app: AppConfig, pipeline: Pipeline) -> MockRuntime:
             return MockRuntime(

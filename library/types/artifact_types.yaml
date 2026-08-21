@@ -10,7 +10,53 @@ types:
       # front-matter block with invented metadata (fr_count: 9 against ten FRs), which
       # the critic then had to argue about. The gate settles it mechanically.
       - { rule: regex, pattern: "\\A#\\s*Requirements:" }
-      - { rule: regex, pattern: "FR-\\d+" }
+
+      # --- the traceable structure (see library/agents/requirements_writer/prompt.md) ---
+      #
+      # These rules are the mechanical half of the document standard. They cannot judge
+      # whether a citation is TRUE — that is the fact-checker's and the critic's work — but
+      # they settle whether the document has the shape in which a citation can exist at
+      # all. A live run produced a flat bulleted list with no sources anywhere and passed a
+      # gate that only asked for the words "FR-" to appear somewhere.
+
+      # Three digits, because IDs are permanent handles: `FR-1` and `FR-01` and `FR-001`
+      # are three names for one requirement across a project's documents.
+      - { rule: regex, pattern: "FR-\\d{3}" }
+
+      # Requirements live in TABLES with a source column. A row is `| FR-001 | ... |`; a
+      # bulleted list cannot carry ID, priority and source per requirement, and the source
+      # per requirement is the whole point.
+      - { rule: regex, pattern: "\\|\\s*FR-\\d{3}\\s*\\|" }
+
+      # Grouped by business area, not one flat table. `### 3.1`, `### 3.2`, ...
+      - { rule: regex, pattern: "(?m)^###\\s*3\\.\\d+\\s+\\S" }
+
+      # Backtick-quoted source citations, the format the whole document is checked in.
+      - { rule: regex, pattern: "(?m)\\|\\s*`[^`]+`[^|]*\\|\\s*$" }
+
+      # The sections a reader needs and the writer keeps dropping. Each is present even
+      # when the sources gave nothing for it — saying "no integrations are named in any
+      # source" is a finding, a silently missing section is an oversight.
+      - { rule: regex, pattern: "(?m)^##\\s*1\\.\\s" }
+      - { rule: regex, pattern: "(?m)^##\\s*3\\.\\s" }
+      - { rule: regex, pattern: "(?m)^##\\s*4\\.\\s" }
+      - { rule: regex, pattern: "(?m)^##\\s*8\\.\\s" }
+      # The three parts of section 8, separately: merged, they hide the useful one.
+      - { rule: regex, pattern: "(?m)^###\\s*8\\.1\\s" }
+      - { rule: regex, pattern: "(?m)^###\\s*8\\.2\\s" }
+      - { rule: regex, pattern: "(?m)^###\\s*8\\.3\\s" }
+      # Non-functional and business-rule identifiers, in table rows like the FRs.
+      - { rule: regex, pattern: "\\|\\s*NFR-\\d{3}\\s*\\|" }
+      - { rule: regex, pattern: "\\|\\s*BR-\\d{3}\\s*\\|" }
+      # Gap and assumption identifiers: §8.2 and §8.3 exist to be filled, and an empty
+      # heading is how "no open questions" gets asserted without being said.
+      - { rule: regex, pattern: "\\|\\s*G-\\d{3}\\s*\\|" }
+      - { rule: regex, pattern: "\\|\\s*A-\\d{3}\\s*\\|" }
+
+      # No section left as a heading with nothing under it — the failure mode these rules
+      # would otherwise invite, since a heading is cheaper than the content it promises.
+      - { rule: no_empty_sections, min_chars: 40 }
+
   # A design with no rules passed the gate at three lines; SPEC §5's own example gives
   # design_doc a min_length. The regex is the mechanical half of "mark what you chose":
   # the section must exist, and the critic judges whether it is honest.

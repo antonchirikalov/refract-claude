@@ -32,6 +32,35 @@ nodes:
   - id: refine
     type: loop
     params: { max_rounds: 3 }
+    # Depth, which the artifact TYPE cannot judge. The type's rules settle shape — the
+    # sections exist, the identifiers are three digits, the requirements sit in tables with
+    # a source column. These settle whether the document is worth reviewing at all.
+    #
+    # A live run produced a competent-looking document with ten requirements and no source
+    # on any of them; both the type rules and the critic passed it, because the critic of
+    # the day was told not to demand tables. What follows is the mechanical floor, so that
+    # the critic spends its judgment on whether the citations are TRUE rather than on
+    # whether they exist.
+    gate_rules:
+      # At least ten requirements. The template standard calls ten the floor for a medium
+      # project and twenty for a complex one; ten is what a gate can insist on without
+      # knowing which it has.
+      - { rule: min_entries, pattern: "(?m)^\\|\\s*FR-\\d{3}\\s*\\|", min: 10 }
+      # At least four business areas: `### 3.1` … plus the out-of-scope subsection. Fewer
+      # than four means everything landed in one or two tables, which is the flat document
+      # the grouping exists to prevent.
+      - { rule: min_entries, pattern: "(?m)^###\\s*3\\.\\d+\\s+\\S", min: 4 }
+      # Non-functional requirements, business rules, gaps and assumptions: three each, and
+      # two gaps. A document that finds no gaps in a set of client interviews has not
+      # looked; every live run so far produced more open questions than requirements areas.
+      - { rule: min_entries, pattern: "(?m)^\\|\\s*NFR-\\d{3}\\s*\\|", min: 3 }
+      - { rule: min_entries, pattern: "(?m)^\\|\\s*BR-\\d{3}\\s*\\|", min: 2 }
+      - { rule: min_entries, pattern: "(?m)^\\|\\s*G-\\d{3}\\s*\\|", min: 2 }
+      - { rule: min_entries, pattern: "(?m)^\\|\\s*A-\\d{3}\\s*\\|", min: 2 }
+      # Priorities must discriminate. If SHOULD and COULD never appear, every requirement
+      # is MUST and the column carries no information — the failure the standard calls out
+      # by name, and the one a reader spots first.
+      - { rule: regex, pattern: "\\|\\s*(SHOULD|COULD)\\s*\\|" }
     body:
       # A CHAIN: the writer states the requirements, then the fact checker walks them
       # against the extracts and hands back the same document with the claims corrected.
@@ -39,8 +68,13 @@ nodes:
       # The corrector is here rather than left to the critic for the reason the article
       # pipeline measured: a critic can only REPORT a number with no source behind it, and
       # reporting it costs a whole revision round, while a corrector settles it inside the
-      # round it appeared in. The agent existed and this template did not use it — README
-      # described this very chain while the library shipped writer-plus-critic alone.
+      # round it appeared in.
+      #
+      # With citations in every row the corrector's work becomes the most valuable in the
+      # pipeline: each row names a source, each extraction carries that source's own words,
+      # and a claim can therefore be held against the words. A citation pointing at a
+      # source that says something else is the most expensive defect a requirements
+      # document can carry, because it looks exactly like diligence.
       #
       # Only the first element gets the critic's remarks (SPEC §10.3); the last element's
       # output is the round's draft, so the critic judges corrected text.

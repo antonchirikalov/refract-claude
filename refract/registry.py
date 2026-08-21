@@ -26,6 +26,7 @@ from refract.models.types import (
     ForbidRegexRule,
     MaxLengthRule,
     MinEntriesRule,
+    MinMatchesRule,
     MinLengthRule,
     NoEmptySectionsRule,
     ProseCharsRule,
@@ -279,6 +280,20 @@ def find_empty_sections(text: str, min_chars: int) -> list[str]:
     return empty
 
 
+def _count_matching_lines(text: str, rule: MinMatchesRule) -> int:
+    """How many LINES the rule's pattern matches.
+
+    Lines, not matches: the callers count things a document has one per line — table rows,
+    headings, identifiers — and counting matches would let one line with two identifiers
+    stand for two rows.
+    """
+    flags = 0
+    for ch in rule.flags or "":
+        flags |= _REGEX_FLAGS.get(ch, 0)
+    pattern = re.compile(rule.pattern, flags)
+    return sum(1 for line in text.splitlines() if pattern.search(line))
+
+
 def apply_rules(
     rules: Sequence[Rule], text: str, base_dir: Path | None = None
 ) -> list[str]:
@@ -368,6 +383,13 @@ def apply_rules(
                 )
         elif isinstance(rule, CitationClosureRule):
             failures.extend(check_citation_closure(text, rule))
+        elif isinstance(rule, MinMatchesRule):
+            n = _count_matching_lines(text, rule)
+            if n < rule.value:
+                failures.append(
+                    f"min_matches {rule.value} not met for /{rule.pattern}/ (got {n}) — "
+                    f"add at least {rule.value - n} more"
+                )
         elif isinstance(rule, MinEntriesRule):
             # a directory rule reaching text means it was put on a `file` type: the gate
             # for dir ports enforces it, and silence here would look like a pass

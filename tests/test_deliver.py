@@ -19,6 +19,8 @@ from refract.deliver import deliver
 from refract.models.pipeline import Pipeline
 from refract.registry import ArtifactRegistry
 
+from reqdoc import requirements_doc
+
 from graph_fixtures import agent_spec, write_registry
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -217,7 +219,7 @@ def test_a_completed_run_delivers_without_being_asked(
         {"providers": {"claude": {"api_key_env": "ANTHROPIC_API_KEY"}}}
     )
     app = AppConfig(library_path=REPO_ROOT / "library", providers=providers)
-    req = "# Requirements: Demo\n\n- FR-1: the system shall do a thing.\n"
+    req = requirements_doc("Demo")
 
     status, run_dir = run_impl(
         project,

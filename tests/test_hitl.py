@@ -23,6 +23,8 @@ from refract.runtime.mock import MockRuntime, ScriptedResponse
 from refract.scheduler import run_pipeline
 from refract.state import Ledger
 
+from reqdoc import requirements_doc
+
 _TYPES = """
 version: "0.1"
 types:
@@ -32,7 +34,7 @@ types:
     rules:
       - { rule: regex, pattern: "^# Requirements:", flags: "m" }
 """
-DOC = "# Requirements: R\n- FR-1 x\n"
+DOC = requirements_doc("R")
 
 
 async def _no_sleep(_seconds: float) -> None:

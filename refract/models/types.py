@@ -219,6 +219,27 @@ class MinEntriesRule(BaseModel):
     value: int = Field(ge=1)
 
 
+class MinMatchesRule(BaseModel):
+    """Content rule for markdown: a pattern must match at least ``value`` times (SPEC §5).
+
+    ``regex`` answers "does the document have this at all", which is the wrong question for
+    anything a document is supposed to have SEVERAL of. A requirements document with one
+    requirement satisfies every ``regex`` rule about requirements; so does one with sixty.
+    Measured on a live run: a document with ten requirements, no sources and a single
+    section passed a gate built entirely out of presence checks.
+
+    The count is of matching lines, not of matches, so a pattern anchored per row with
+    ``(?m)^`` counts rows. That is what the callers want — table rows, subsections,
+    identifiers — and it makes a repeated match inside one line count once.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    rule: Literal["min_matches"]
+    pattern: str
+    value: int = Field(ge=1)
+    flags: str = "m"
+
+
 class CitationClosureRule(BaseModel):
     """Content rule: the document's numbered source list has to hold together.
 
@@ -256,6 +277,7 @@ Rule = Annotated[
         ProseCharsRule,
         NoEmptySectionsRule,
         MinEntriesRule,
+        MinMatchesRule,
         CitationClosureRule,
     ],
     Field(discriminator="rule"),

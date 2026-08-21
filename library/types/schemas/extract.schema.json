@@ -1,18 +1,23 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "extract@v1",
-  "description": "Structured extraction from a single source document (SPEC §5). One per source; assembled into collection<extract@v1> by the map node.",
+  "description": "Structured extraction from a single source document (SPEC §5). One per source; assembled into collection<extract@v1> by the map node. Carries what a traceable requirements document needs: every item names its source and, where the source states it in words, quotes those words.",
   "type": "object",
   "additionalProperties": true,
-  "required": ["source", "requirements", "trust_level"],
+  "required": ["source", "source_type", "requirements", "trust_level"],
   "properties": {
     "source": {
       "type": "string",
-      "description": "Human-readable identifier of the source this extraction came from."
+      "description": "Human-readable identifier of this source — the file name as it will appear in the requirements document's source index."
+    },
+    "source_type": {
+      "type": "string",
+      "description": "What KIND of document this is. It sets how much weight its statements carry: a signed request for proposals is not a chat log. Shown in the document index.",
+      "enum": ["rfp", "brief", "spreadsheet", "pdf", "chat", "qa", "interview", "transcript", "email", "diagram", "spec", "other"]
     },
     "requirements": {
       "type": "array",
-      "description": "Discrete requirements found in the source (each an object). Empty is valid.",
+      "description": "Discrete requirements found in the source. Empty is valid: a source that states none is a real answer.",
       "items": {
         "type": "object",
         "additionalProperties": true,
@@ -20,12 +25,120 @@
         "properties": {
           "text": {
             "type": "string",
-            "description": "One clear, self-contained requirement sentence."
+            "description": "One clear, self-contained requirement sentence, in the language of the source."
           },
           "category": {
             "type": "string",
-            "enum": ["functional", "non_functional", "constraint", "assumption"]
+            "enum": ["functional", "non_functional", "constraint", "business_rule", "assumption"]
+          },
+          "domain": {
+            "type": "string",
+            "description": "The business area this belongs to: authentication, booking, notifications, reporting. The requirements document groups its sections by these, so naming it here is what makes that grouping possible."
+          },
+          "priority": {
+            "type": "string",
+            "description": "MUST only when the source treats it as essential. A document whose every requirement is MUST has prioritised nothing.",
+            "enum": ["MUST", "SHOULD", "COULD"]
+          },
+          "quote": {
+            "type": "string",
+            "description": "The source's own words for this requirement, verbatim, when it states it in words. This is what makes the requirement checkable: a later stage holds the written requirement against the quote and sees whether they say the same thing. Omit only when the source carries it as a table cell, a diagram or a checkbox with no sentence to quote."
+          },
+          "locator": {
+            "type": "string",
+            "description": "Where in the source it sits: sheet and row, page, section heading, timestamp. What a reader needs to find it again."
+          },
+          "measure": {
+            "type": "string",
+            "description": "The number the source gives, if any: 1000 users, under 200 ms, seven years of retention. A non-functional requirement without one cannot be tested."
           }
+        }
+      }
+    },
+    "stakeholders": {
+      "type": "array",
+      "description": "Roles the source names, with what the source says they do.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["role"],
+        "properties": {
+          "role": { "type": "string" },
+          "description": { "type": "string" },
+          "quote": { "type": "string" },
+          "tentative": {
+            "type": "boolean",
+            "description": "True when the role appears only in passing: a box in a diagram, an unexplained word. Lets the document mark it unconfirmed instead of inventing a job for it."
+          }
+        }
+      }
+    },
+    "business_context": {
+      "type": "array",
+      "description": "Facts about the business that are not requirements but decide how requirements are read: the model, the market, the deadline, what a previous vendor left behind.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["fact"],
+        "properties": {
+          "fact": { "type": "string" },
+          "quote": { "type": "string" },
+          "locator": { "type": "string" }
+        }
+      }
+    },
+    "data_entities": {
+      "type": "array",
+      "description": "Things the system stores, as the source names them, with the attributes it mentions.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["entity"],
+        "properties": {
+          "entity": { "type": "string" },
+          "attributes": { "type": "array", "items": { "type": "string" } },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "integrations": {
+      "type": "array",
+      "description": "External systems the source says this one must talk to.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["system"],
+        "properties": {
+          "system": { "type": "string" },
+          "purpose": { "type": "string" },
+          "priority": { "type": "string", "enum": ["MUST", "SHOULD", "COULD"] },
+          "quote": { "type": "string" }
+        }
+      }
+    },
+    "out_of_scope": {
+      "type": "array",
+      "description": "What the source explicitly EXCLUDES. A scope boundary someone stated is as load-bearing as a requirement, and it is the first thing lost when nobody writes it down.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["item"],
+        "properties": {
+          "item": { "type": "string" },
+          "quote": { "type": "string" }
+        }
+      }
+    },
+    "internal_conflicts": {
+      "type": "array",
+      "description": "Places where this ONE source contradicts itself: a sheet marking a feature both in scope and out. Report it here rather than picking a side. The contradiction is a finding, and resolving it belongs to the stage that sees every source at once.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["description"],
+        "properties": {
+          "description": { "type": "string" },
+          "locators": { "type": "array", "items": { "type": "string" } }
         }
       }
     },

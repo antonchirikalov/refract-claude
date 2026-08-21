@@ -39,15 +39,55 @@ nodes:
       # The corrector is here rather than left to the critic for the reason the article
       # pipeline measured: a critic can only REPORT a number with no source behind it, and
       # reporting it costs a whole revision round, while a corrector settles it inside the
-      # round it appeared in. The agent existed and this template did not use it — README
-      # described this very chain while the library shipped writer-plus-critic alone.
+      # round it appeared in.
+      #
+      # With citations in every row the corrector's work becomes the most valuable in the
+      # pipeline: each row names a source, each extraction carries that source's own words,
+      # and a claim can therefore be held against the words. A citation pointing at a
+      # source that says something else is the most expensive defect a requirements
+      # document can carry, because it looks exactly like diligence.
       #
       # Only the first element gets the critic's remarks (SPEC §10.3); the last element's
       # output is the round's draft, so the critic judges corrected text.
       - agent: requirements_writer@1
         inputs: { extracts: extract.extract }
+        # Depth and discrimination, which the artifact TYPE cannot judge. The type settles
+        # shape — sections exist, identifiers are three digits, requirements sit in tables
+        # with a source column. These settle whether the document is worth reviewing.
+        #
+        # A live run produced a competent-looking document with ten requirements and no
+        # source on any of them, and both the type rules and the critic passed it. This is
+        # the mechanical floor, so the critic spends its judgment on whether the citations
+        # are TRUE rather than on whether they exist.
+        #
+        # Ten requirements is the standard's floor for a medium project; four subsections
+        # means the areas were actually separated; a document that finds fewer than two
+        # gaps in a set of client interviews has not looked. The last rule is the one a
+        # reader spots first: if SHOULD and COULD never appear, every row is MUST and the
+        # priority column carries no information at all.
+        gate_rules:
+        - { rule: min_matches, pattern: "(?m)^\\|\\s*FR-\\d{3}\\s*\\|", value: 10 }
+        - { rule: min_matches, pattern: "(?m)^###\\s*3\\.\\d+\\s+\\S", value: 4 }
+        - { rule: min_matches, pattern: "(?m)^\\|\\s*NFR-\\d{3}\\s*\\|", value: 3 }
+        - { rule: min_matches, pattern: "(?m)^\\|\\s*BR-\\d{3}\\s*\\|", value: 2 }
+        - { rule: min_matches, pattern: "(?m)^\\|\\s*G-\\d{3}\\s*\\|", value: 2 }
+        - { rule: min_matches, pattern: "(?m)^\\|\\s*A-\\d{3}\\s*\\|", value: 2 }
+        - { rule: regex, pattern: "\\|\\s*(SHOULD|COULD)\\s*\\|" }
       - agent: requirements_fact_checker@1
         inputs: { draft: "@prev", extracts: extract.extract }
+        # The same floor on the corrector. Its job is to edit, and the cheapest way to
+        # fail at editing is to rewrite: a retyped document loses whatever the editor had
+        # no opinion about, and the loss is invisible because the result still reads as one
+        # document. If a correction costs the document its structure, the gate says so here
+        # rather than three nodes later.
+        gate_rules:
+        - { rule: min_matches, pattern: "(?m)^\\|\\s*FR-\\d{3}\\s*\\|", value: 10 }
+        - { rule: min_matches, pattern: "(?m)^###\\s*3\\.\\d+\\s+\\S", value: 4 }
+        - { rule: min_matches, pattern: "(?m)^\\|\\s*NFR-\\d{3}\\s*\\|", value: 3 }
+        - { rule: min_matches, pattern: "(?m)^\\|\\s*BR-\\d{3}\\s*\\|", value: 2 }
+        - { rule: min_matches, pattern: "(?m)^\\|\\s*G-\\d{3}\\s*\\|", value: 2 }
+        - { rule: min_matches, pattern: "(?m)^\\|\\s*A-\\d{3}\\s*\\|", value: 2 }
+        - { rule: regex, pattern: "\\|\\s*(SHOULD|COULD)\\s*\\|" }
     critic:
       agent: requirements_critic@1
       inputs: { draft: "@body", extracts: extract.extract }

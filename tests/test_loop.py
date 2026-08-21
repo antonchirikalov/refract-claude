@@ -26,6 +26,8 @@ from refract.runtime.mock import MockRuntime, ScriptedResponse
 from refract.scheduler import run_pipeline
 from refract.state import Ledger
 
+from reqdoc import requirements_doc
+
 
 class _BoomRuntime:
     """Fails the test if any step is executed (used to prove reuse on resume)."""
@@ -37,9 +39,9 @@ class _BoomRuntime:
         return None
 
 
-DOC1 = "# Requirements: v1\n- FR-1 alpha\n"
-DOC2 = "# Requirements: v2\n- FR-1 beta\n"
-DOC3 = "# Requirements: v3\n- FR-1 gamma\n"
+DOC1 = requirements_doc("v1")
+DOC2 = requirements_doc("v2")
+DOC3 = requirements_doc("v3")
 
 _TYPES = """
 version: "0.1"

@@ -37,7 +37,7 @@ FOUND = {
         ]
     ),
 }
-EXTRACT = json.dumps({"source": "s", "requirements": [], "trust_level": "low"})
+EXTRACT = json.dumps({"source": "s", "source_type": "brief", "requirements": [], "trust_level": "low"})
 
 
 def _clock_seq() -> "callable":

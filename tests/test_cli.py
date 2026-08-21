@@ -36,11 +36,13 @@ from refract.models.pipeline import Pipeline
 from refract.runtime.base import AgentRuntime, EventCallback, StepResult, StepSpec
 from refract.runtime.mock import MockRuntime, ScriptedResponse
 
+from reqdoc import requirements_doc
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LIBRARY_PATH = REPO_ROOT / "library"
 DEMO_PROJECT = REPO_ROOT / "examples" / "demo-project"
 
-REQ = "# Requirements: Demo\n\n- FR-1: the system shall do a thing.\n"
+REQ = requirements_doc("Demo")
 
 
 def _clock_seq() -> Callable[[], str]:

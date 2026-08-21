@@ -8,9 +8,11 @@ from pathlib import Path
 import pytest
 
 from refract.models.errors import Code, RegistryError
+from refract.models.types import MinMatchesRule
 from refract.registry import (
     INLINE_MAX_BYTES,
     ArtifactRegistry,
+    apply_rules,
     check_edge,
     make_collection,
     model_slug,
@@ -1139,3 +1141,60 @@ class TestNoEmptySections:
 
         text = "# А\n\nтекст\n"
         assert measure_rules([self._rule()], text)["empty_sections"] == 0
+
+
+class TestMinMatches:
+    """`regex` answers "is this here at all", which is the wrong question for anything a
+    document must have SEVERAL of. A live run shipped a requirements document with one
+    requirement and no sources; every presence check passed."""
+
+    def _rule(self, pattern: str, value: int) -> MinMatchesRule:
+        return MinMatchesRule(rule="min_matches", pattern=pattern, value=value)
+
+    def test_enough_matches_passes(self) -> None:
+        text = "| FR-001 | a |\n| FR-002 | b |\n| FR-003 | c |\n"
+        assert apply_rules([self._rule(r"^\|\s*FR-\d{3}\s*\|", 3)], text) == []
+
+    def test_too_few_says_how_many_more(self) -> None:
+        text = "| FR-001 | a |\n"
+        problems = apply_rules([self._rule(r"^\|\s*FR-\d{3}\s*\|", 10)], text)
+        assert len(problems) == 1
+        assert "got 1" in problems[0]
+        assert "add at least 9 more" in problems[0]
+
+    def test_it_counts_lines_not_matches(self) -> None:
+        """One line carrying two identifiers is one row, not two.
+
+        Counting matches would let a single line satisfy a floor meant to require rows.
+        """
+        text = "| FR-001 | see FR-002 |\n"
+        problems = apply_rules([self._rule(r"FR-\d{3}", 2)], text)
+        assert problems and "got 1" in problems[0]
+
+    def test_multiline_is_the_default(self) -> None:
+        """The callers anchor per row with `^`, and a rule whose default made `^` mean
+        start-of-document would silently count zero."""
+        text = "intro\n| FR-001 | a |\n| FR-002 | b |\n"
+        assert apply_rules([self._rule(r"^\|\s*FR-\d{3}\s*\|", 2)], text) == []
+
+    def test_a_zero_floor_is_refused_at_load(self) -> None:
+        """A floor of zero is satisfied by an empty document, so it is a mistake, not a
+        configuration."""
+        import pydantic
+
+        with pytest.raises(pydantic.ValidationError):
+            MinMatchesRule(rule="min_matches", pattern="x", value=0)
+
+    def test_the_prompt_shows_the_floor_and_the_pattern(self) -> None:
+        """A floor of ten means nothing without saying ten of WHAT — and a bound the agent
+        cannot see is a bound it fails blind, which cost a live run three rounds."""
+        import pathlib
+
+        from refract.prompt import _schema_summary
+
+        registry = ArtifactRegistry.load(pathlib.Path("library"))
+        text = _schema_summary(
+            registry, "requirements@v1", [self._rule(r"^\|\s*FR-\d{3}\s*\|", 10)]
+        )
+        assert "At least 10 lines matching" in text
+        assert "FR-" in text
