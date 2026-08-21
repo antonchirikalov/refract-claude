@@ -25,6 +25,7 @@ from refract.snapshot import build_resolved
 from refract.state import Ledger
 
 from reqdoc import requirements_doc
+from designdoc import design_doc
 
 LIBRARY = Path(__file__).resolve().parents[1] / "library"
 TEMPLATES = LIBRARY / "templates"
@@ -97,12 +98,7 @@ def test_template_validates(name: str) -> None:
 _REQ = requirements_doc("T")
 # design_doc@v1 now requires a real body and a declared assumptions section (SPEC §5),
 # so the scripted output must clear the same gate a real agent faces
-_DESIGN = (
-    "# Design\n\n## Approach\n\n"
-    + ("A paragraph of solution design body text that carries weight. " * 40)
-    + "\n\n## Risks and mitigations\n\n- Sync conflicts; supervisor review.\n"
-    + "\n\n## Assumptions to confirm\n\n- Versions named are proposals.\n"
-)
+_DESIGN = design_doc("T")
 _REPORT = "# Discovery\nOpen questions and unknowns.\n"
 _APPROVED = json.dumps({"verdict": "approved"})
 _EXTRACT = json.dumps({"source": "s", "source_type": "brief", "requirements": [], "trust_level": "low"})

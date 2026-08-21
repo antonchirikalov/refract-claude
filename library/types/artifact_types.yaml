@@ -65,11 +65,59 @@ types:
     format: markdown
     rules:
       - { rule: min_length, value: 2000 }
-      - { rule: regex, pattern: '^##\s*Assumptions to confirm', flags: "m" }
-      # A live run shipped a design with no risks section at all; the critic spent a
-      # whole round saying so. Heading wording stays free (numbered, singular, "and
-      # mitigations") — only its presence is mechanical.
-      - { rule: regex, pattern: '^#{2,3}[^\n]*[Rr]isk', flags: "m" }
+
+      # --- the committed-proposal structure (library/agents/solution_designer/prompt.md) ---
+      #
+      # The industry standard this follows is a client-facing technical proposal: one
+      # architecture, no estimates, tables where the material is tabular, prose where it
+      # teaches, and a figure wherever a diagram beats a paragraph. A live run produced a
+      # document that read as a draft — bold text as emphasis, requirements restated rather
+      # than answered — and passed a gate that asked only for length and two headings.
+
+      # The five sections, numbered, in order.
+      - { rule: regex, pattern: '(?m)^##\s*1\.\s' }
+      - { rule: regex, pattern: '(?m)^##\s*2\.\s' }
+      - { rule: regex, pattern: '(?m)^##\s*3\.\s' }
+      - { rule: regex, pattern: '(?m)^##\s*4\.\s' }
+      - { rule: regex, pattern: '(?m)^##\s*5\.\s' }
+      # Section 1 is structured, not a flat prose block: context, architecture, the bet.
+      - { rule: regex, pattern: '(?m)^###\s*1\.1\s' }
+      - { rule: regex, pattern: '(?m)^###\s*1\.2\s' }
+      - { rule: regex, pattern: '(?m)^###\s*1\.3\s' }
+      - { rule: regex, pattern: '(?m)^###\s*2\.1\s' }
+      # Phase 0 validates the architecture before any feature work; its absence is how a
+      # proposal promises a design it never has to defend.
+      - { rule: regex, pattern: '(?m)^###?\s*Phase\s*0' }
+
+      # Tables where the material is tabular. Each of these is a row shape, so a document
+      # that renders the same content as bullets fails here rather than in review.
+      #   stakeholder rows carry a source; phase rows carry an exit criterion
+      - { rule: min_matches, pattern: '(?m)^\|\s*\d+\s*\|', value: 8 }
+      - { rule: regex, pattern: '(?m)^\|\s*(Phase|0|1)\s*\|' }
+      # At least one figure placeholder: the architecture overview in 1.2 is mandatory.
+      # The placeholder IS the deliverable at this stage — the illustrator fills it later.
+      - { rule: regex, pattern: 'ILLUSTRATION:' }
+      - { rule: regex, pattern: '(?m)^\*Figure\s+\d+\.' }
+      # Assumptions and risks stay: a proposal that states neither has hidden both.
+      - { rule: regex, pattern: '(?m)^#{2,3}[^\n]*([Aa]ssumption|[Дд]опущени)' }
+      - { rule: regex, pattern: '(?m)^#{2,3}[^\n]*([Rr]isk|[Рр]иск)' }
+
+      # --- what must NOT be there ---------------------------------------------------
+      #
+      # Bold as emphasis. The owner named this twice, and the standard makes it a finding:
+      # bold reads as machine-generated and it is what a writer reaches for instead of
+      # structure. Headings, tables and plain prose carry emphasis instead. Code literals
+      # in backticks are unaffected — this matches on `**` only.
+      - { rule: forbid_regex, pattern: '\*\*[^*\n]+\*\*', max_hits: 0 }
+      # Estimates of any kind. A design document that quotes a duration or a price has
+      # answered a question nobody asked it and created a commitment nobody costed. Phases
+      # are bounded by what they deliver and by their exit criterion.
+      - { rule: forbid_regex, pattern: '\b\d+\s*(?:man|person)[- ]?(?:day|week|month|hour)s?\b', flags: "i", max_hits: 0 }
+      - { rule: forbid_regex, pattern: '\b(?:S/M/L|S,\s*M,\s*L|T-shirt siz)', flags: "i", max_hits: 0 }
+      - { rule: forbid_regex, pattern: '\b\d+\s*story\s*points?\b', flags: "i", max_hits: 0 }
+      # No heading left as a promise with nothing under it.
+      - { rule: no_empty_sections, min_chars: 60 }
+
   # Research brief/topic: what a `discover` pipeline searches from (SPEC §20.4).
   brief@v1: { kind: file, format: markdown }
   # A discover agent's output: one file per found source (+ optional _index.json).

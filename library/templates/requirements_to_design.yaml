@@ -11,7 +11,10 @@ checkpoints: [refine]
 # signs; the design is what gets built from them.
 outputs:
   requirements: refine.doc
-  design: sd_refine.design
+  # the ILLUSTRATED design, not the draft the loop produced: the figures node returns the
+  # same document with its placeholders filled, and that is what a person opens
+  design: figures.document
+  illustrations: figures.illustration
 
 nodes:
   # Why one pipeline instead of the separate `extract` + `solution_design` templates:
@@ -121,3 +124,20 @@ nodes:
       # port, not just the previous node's (SPEC §8.1)
       inputs: { draft: "@body", requirements: refine.doc }
     outputs: { design: "@body" }
+
+  - id: figures
+    type: agent
+    agent: design_illustrator@1
+    inputs: { design: sd_refine.design }
+    # The design declares its own figures as `<!-- ILLUSTRATION: <slug> -->` placeholders,
+    # so this node has a contract to fulfil rather than a judgment to make: one figure per
+    # placeholder, under the filename the placeholder named. It also returns the document
+    # with the placeholders replaced by image references, which is why it comes last — the
+    # deliverable is an illustrated design, not a design plus a folder of loose pictures.
+    gate_rules:
+      # The illustrated document must still be a design document, and it must no longer
+      # carry work orders for figures that have been drawn. A live run of the article
+      # pipeline shipped a document whose placeholders were never replaced, and nothing
+      # noticed until a person opened it.
+      - { rule: forbid_regex, pattern: 'ILLUSTRATION:', max_hits: 0 }
+      - { rule: min_matches, pattern: '(?m)!\[[^\]]*\]\(illustrations/', value: 1 }

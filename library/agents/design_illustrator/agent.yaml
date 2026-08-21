@@ -1,0 +1,32 @@
+name: design_illustrator
+version: 1
+description: >
+  Fulfils the illustration placeholders a solution design declared. For every
+  `<!-- ILLUSTRATION: <slug> ... -->` comment in the document it runs the figgybanana CLI
+  once, writes output/illustration/<slug>.png, and returns the SAME document with each
+  placeholder replaced by a markdown image reference — so the deliverable is an illustrated
+  design, not a design plus a folder of loose pictures. Records the exact command per figure
+  so any one can be regenerated unchanged.
+consumes:
+  - { port: design, type: design_doc@v1 }
+produces:
+  # The illustrated document is the primary output: it is what a person opens.
+  - { port: document, type: design_doc@v1 }
+  - { port: illustration, type: illustration@v1 }
+# bash, because the work is invoking a CLI. A knowing exception: the workdir guard does not
+# match Bash, so on this step I1 rests on the prompt rather than on the hook.
+needs: [read, edit, bash]
+# The figure tool is a CLI, not an MCP server, so what it reads from the environment has to
+# be declared here or the step will not be given it (I8). Names only.
+env:
+  - PAPERBANANA_BIN
+  - SS_GATEWAY_COMMAND
+  - SS_GATEWAY_WRAPPER
+  - SS_GATEWAY_PROFILE
+  - SS_GATEWAY_BACKEND
+  - SS_GATEWAY_IMAGE_MODEL
+  - IMAGE_PROVIDER
+  - MOONSHOT_API_KEY
+defaults:
+  # Each figure is a full multi-agent run inside the tool, and a design carries several.
+  timeout_s: 5400
