@@ -35,12 +35,15 @@ from refract.models.agent import AgentSpec
 from refract.models.pipeline import Node, Pipeline
 from refract.registry import ArtifactRegistry
 
-OUTPUT_DIRNAME = "output"
-# Where a person looks for the result. `runs/<id>/output/` is the record — one per run,
-# immutable, addressable — and it is four directories deep under a name that changes every
-# time. Nobody browses that to read a document. `result/` sits in the project root and holds
-# the latest run's delivery, so "where is it" has one answer that does not move.
-RESULT_DIRNAME = "result"
+# The run's delivery: `runs/<id>/result/`. Named `result`, not `output`, because `output`
+# already means the outbox of one STEP (`steps/<id>/output/`) — the same word on two levels
+# for two different things, which is most of why the run tree read as a maze.
+OUTPUT_DIRNAME = "result"
+# A mirror of the newest run's delivery, in the project root where a person looks. Named
+# `latest`, not `result`: it is overwritten by the next run, and a directory called `result`
+# invites the belief that results accumulate there. Each run keeps its own under
+# `runs/<id>/result/`, untouched by anything that happens afterwards.
+RESULT_DIRNAME = "latest"
 
 
 @dataclass

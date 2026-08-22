@@ -15,7 +15,12 @@ from pathlib import Path
 import pytest
 import yaml
 
-from refract.deliver import DeliveryReport, deliver
+from refract.deliver import (
+    OUTPUT_DIRNAME,
+    RESULT_DIRNAME,
+    DeliveryReport,
+    deliver,
+)
 from refract.models.pipeline import Pipeline
 from refract.registry import ArtifactRegistry
 
@@ -75,8 +80,8 @@ def test_a_file_output_arrives_under_the_declared_name(tmp_path: Path) -> None:
         agents=_agents(),
     )
     assert report.ok
-    assert report.delivered == {"requirements": "output/requirements.md"}
-    assert (run_dir / "output" / "requirements.md").read_text("utf-8").startswith("# Doc")
+    assert report.delivered == {"requirements": f"{OUTPUT_DIRNAME}/requirements.md"}
+    assert (run_dir / OUTPUT_DIRNAME / "requirements.md").read_text("utf-8").startswith("# Doc")
 
 
 def test_no_outputs_declared_delivers_nothing(tmp_path: Path) -> None:
@@ -89,7 +94,7 @@ def test_no_outputs_declared_delivers_nothing(tmp_path: Path) -> None:
         agents=_agents(),
     )
     assert report.ok and report.delivered == {}
-    assert not (run_dir / "output").exists()
+    assert not (run_dir / OUTPUT_DIRNAME).exists()
 
 
 def test_a_missing_artifact_is_reported_not_skipped(tmp_path: Path) -> None:
@@ -111,7 +116,7 @@ def test_delivery_is_rebuilt_not_merged(tmp_path: Path) -> None:
     """A stale artifact from an earlier attempt must not sit beside a fresh one."""
     run_dir = _run_with_output(tmp_path)
     registry = write_registry(tmp_path)
-    stale = run_dir / "output" / "gone.md"
+    stale = run_dir / OUTPUT_DIRNAME / "gone.md"
     stale.parent.mkdir(parents=True, exist_ok=True)
     stale.write_text("from a previous delivery", encoding="utf-8")
     deliver(
@@ -121,7 +126,7 @@ def test_delivery_is_rebuilt_not_merged(tmp_path: Path) -> None:
         agents=_agents(),
     )
     assert not stale.exists()
-    assert (run_dir / "output" / "requirements.md").exists()
+    assert (run_dir / OUTPUT_DIRNAME / "requirements.md").exists()
 
 
 def test_an_unknown_port_is_reported(tmp_path: Path) -> None:
@@ -183,7 +188,7 @@ def test_a_dir_output_arrives_as_a_directory(tmp_path: Path) -> None:
     )
     report = deliver(run_dir, pipeline=pipeline, registry=registry, agents=agents)
     assert report.ok, report.missing
-    delivered = run_dir / "output" / "figures"
+    delivered = run_dir / OUTPUT_DIRNAME / "figures"
     assert delivered.is_dir()
     assert (delivered / "x-to-qkv.png").exists()
 
@@ -233,8 +238,8 @@ def test_a_completed_run_delivers_without_being_asked(
     )
     assert status is RunStatus.completed
     # a map node's port is a collection: it arrives as a directory named by the pipeline
-    delivered = run_dir / "output" / "requirements"
-    assert delivered.is_dir(), sorted((run_dir / "output").iterdir())
+    delivered = run_dir / OUTPUT_DIRNAME / "requirements"
+    assert delivered.is_dir(), sorted((run_dir / OUTPUT_DIRNAME).iterdir())
     assert (delivered / "_collection.json").exists()
 
 
@@ -274,7 +279,7 @@ def test_an_empty_directory_is_missing_not_delivered(tmp_path: Path) -> None:
     report = deliver(run_dir, pipeline=pipeline, registry=registry, agents=agents)
     assert not report.ok
     assert "empty directory" in report.missing["figures"]
-    assert not (run_dir / "output" / "figures").exists()
+    assert not (run_dir / OUTPUT_DIRNAME / "figures").exists()
 
 
 def test_a_dot_entry_alone_is_still_empty(tmp_path: Path) -> None:
@@ -343,9 +348,9 @@ def test_the_unresolved_report_travels_with_the_deliverable(tmp_path: Path) -> N
         agents=_agents(),
     )
     assert report.ok
-    text = (run_dir / "output" / "_unresolved.md").read_text("utf-8")
+    text = (run_dir / OUTPUT_DIRNAME / "_unresolved.md").read_text("utf-8")
     assert "форма матриц неверна" in text
-    assert report.delivered["unresolved"] == "output/_unresolved.md"
+    assert report.delivered["unresolved"] == f"{OUTPUT_DIRNAME}/_unresolved.md"
 
 
 def test_two_loops_keep_their_findings_apart(tmp_path: Path) -> None:
@@ -359,7 +364,7 @@ def test_two_loops_keep_their_findings_apart(tmp_path: Path) -> None:
         registry=write_registry(tmp_path),
         agents=_agents(),
     )
-    out = run_dir / "output" / "unresolved"
+    out = run_dir / OUTPUT_DIRNAME / "unresolved"
     assert (out / "refine.md").read_text("utf-8").endswith("первое\n")
     assert (out / "sd_refine.md").read_text("utf-8").endswith("второе\n")
     assert "(2)" in report.delivered["unresolved"]
@@ -374,7 +379,7 @@ def test_nothing_open_means_no_report_in_the_delivery(tmp_path: Path) -> None:
         agents=_agents(),
     )
     assert "unresolved" not in report.delivered
-    assert not (run_dir / "output" / "_unresolved.md").exists()
+    assert not (run_dir / OUTPUT_DIRNAME / "_unresolved.md").exists()
 
 
 # --- <project>/result/: where a person looks (SPEC §22) ----------------------
@@ -398,28 +403,28 @@ class TestResultDirectory:
 
     def test_the_delivery_is_mirrored_into_the_project_root(self, tmp_path: Path) -> None:
         run_dir, report = self._deliver(tmp_path)
-        result = run_dir.parent.parent / "result"
+        result = run_dir.parent.parent / RESULT_DIRNAME
         assert report.result_dir == result
         assert (result / "requirements.md").read_text("utf-8") == (
-            run_dir / "output" / "requirements.md"
+            run_dir / OUTPUT_DIRNAME / "requirements.md"
         ).read_text("utf-8")
 
     def test_it_records_which_run_it_came_from(self, tmp_path: Path) -> None:
         """Without this the directory is an orphan: current, but of what?"""
         run_dir, _report = self._deliver(tmp_path)
-        stamp = (run_dir.parent.parent / "result" / "FROM_RUN.txt").read_text("utf-8")
+        stamp = (run_dir.parent.parent / RESULT_DIRNAME / "FROM_RUN.txt").read_text("utf-8")
         assert stamp.strip() == run_dir.name
 
     def test_a_real_copy_not_a_link(self, tmp_path: Path) -> None:
         """This directory gets zipped and sent; a link travels as a broken pointer."""
         run_dir, _report = self._deliver(tmp_path)
-        f = run_dir.parent.parent / "result" / "requirements.md"
+        f = run_dir.parent.parent / RESULT_DIRNAME / "requirements.md"
         assert not f.is_symlink()
 
     def test_a_later_run_replaces_it_wholesale(self, tmp_path: Path) -> None:
         """A file the new run stopped delivering must not linger looking current."""
         run_dir, _report = self._deliver(tmp_path)
-        result = run_dir.parent.parent / "result"
+        result = run_dir.parent.parent / RESULT_DIRNAME
         (result / "leftover.md").write_text("from an older run", encoding="utf-8")
         deliver(
             run_dir,
@@ -433,7 +438,7 @@ class TestResultDirectory:
     def test_publishing_can_be_switched_off(self, tmp_path: Path) -> None:
         run_dir, report = self._deliver(tmp_path, publish=False)
         assert report.result_dir is None
-        assert not (run_dir.parent.parent / "result").exists()
+        assert not (run_dir.parent.parent / RESULT_DIRNAME).exists()
 
     def test_nothing_delivered_publishes_nothing(self, tmp_path: Path) -> None:
         """An empty result directory is worse than none: it reads as a finished run."""
@@ -445,4 +450,4 @@ class TestResultDirectory:
             agents=_agents(),
         )
         assert report.result_dir is None
-        assert not (run_dir.parent.parent / "result").exists()
+        assert not (run_dir.parent.parent / RESULT_DIRNAME).exists()

@@ -6,7 +6,7 @@ a delivery team reads before building.
 Russian. Keep identifiers (`FR-001`, `NFR-002`), technology names and code literals as they
 are; translate everything else.
 
-## Four rules that override everything below
+## Five rules that override everything below
 
 1. **One architecture, not several.** The document puts forward ONE design. A credible
    alternative is dismissed in a single prose sentence at the point where the decision is
@@ -27,6 +27,15 @@ are; translate everything else.
 4. **A list where there is a list.** Three or more items in sequence become a bullet list,
    including inside a paragraph. A sentence that runs "A, B, and C" is three facts wearing
    one coat.
+
+5. **Backticks for literals only.** A backtick means "type this exactly": a table or column
+   name, a flag, a path, a command, a config key, an identifier from the requirements
+   (`FR-001`). It does NOT go around the name of a library, a product, a service or a
+   module — structlog, PostgreSQL, nginx, the booking module are words, and they are set as
+   words. A page where every technology wears backticks reads like a config file, and by
+   the time everything is marked, nothing is: the reader can no longer tell which strings
+   are literal and which are just nouns. When in doubt, ask whether someone would paste it
+   into a terminal or a schema; if not, no backticks.
 
 ## Structure
 
