@@ -14,7 +14,7 @@ outputs:
   # the ILLUSTRATED design, not the draft the loop produced: the figures node returns the
   # same document with its placeholders filled, and that is what a person opens
   design: figures.document
-  illustrations: figures.illustration
+  illustration: figures.illustration
 
 nodes:
   # Why one pipeline instead of the separate `extract` + `solution_design` templates:
@@ -144,4 +144,9 @@ nodes:
       # `ILLUSTRATION: <slug>`" — and this rule failed the step three times over that
       # sentence. What must be gone is the work order: the HTML comment that opens one.
       - { rule: forbid_regex, pattern: '<!--\s*ILLUSTRATION:', max_hits: 0 }
-      - { rule: min_matches, pattern: '(?m)!\[[^\]]*\]\(illustrations/', value: 1 }
+      # The link must point at `illustration/` — the port name, and therefore the
+              # directory name both in the step tree and in the delivery. A live run wrote
+              # `illustrations/` (plural) and every image in the document was broken, in a
+              # document that otherwise looked finished.
+      - { rule: min_matches, pattern: '(?m)!\[[^\]]*\]\(illustration/', value: 1 }
+      - { rule: forbid_regex, pattern: '\]\(illustrations/', max_hits: 0 }

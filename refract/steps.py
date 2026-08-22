@@ -16,6 +16,7 @@ import asyncio
 import json
 import random
 import shutil
+import unicodedata
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -218,6 +219,46 @@ def _materialize(inputs: list[InputSpec], input_root: Path) -> None:
             link_or_copy(spec.src, dst)
 
 
+def sweep_mojibake_dirs(workdir: Path) -> int:
+    """Remove EMPTY directories whose names are broken bytes; returns how many.
+
+    Measured across two pipelines: a step that uses `bash` ends up with a handful of empty
+    directories whose names are undecodable — surrogate escapes and characters from the far
+    end of the BMP, three to eleven of them, always empty, always beside `prompt.md` and
+    `output/`. They correlate exactly with `bash`: no step without it has ever grown one.
+    The tool the agent shells out to does not produce them when run directly, so the
+    creator is somewhere inside the shell layer, and finding it means hours inside another
+    project's process tree.
+
+    They are harmless and they make the step unreadable, which is a bad trade to leave in
+    place. So the engine sweeps them, under two conditions that make the sweep safe:
+
+    - EMPTY only. Anything with content is somebody's data, whatever its name looks like.
+    - Undecodable names only: a surrogate (a byte that never decoded) or an unassigned
+      code point. A Russian or Chinese directory name is perfectly legal and is left alone.
+    """
+    if not workdir.is_dir():
+        return 0
+    removed = 0
+    for child in list(workdir.iterdir()):
+        if not child.is_dir() or child.is_symlink():
+            continue
+        name = child.name
+        broken = any(0xD800 <= ord(ch) <= 0xDFFF for ch in name) or any(
+            unicodedata.category(ch) in ("Cn", "Co", "Cs") for ch in name
+        )
+        if not broken:
+            continue
+        try:
+            if any(child.iterdir()):
+                continue
+            child.rmdir()
+            removed += 1
+        except OSError:
+            continue  # busy or gone; not worth failing a step over
+    return removed
+
+
 def _rejected_input(workdir: Path, archived: int) -> str | None:
     """COPY the archived attempt's ``output/`` in as ``input/_rejected/`` (SPEC §10.2).
 
@@ -410,11 +451,35 @@ async def execute_agent_step(
                 | reported.model_dump(exclude={"calls"}),
             }
         )
+        # Also into the ledger, per paid call rather than at the end of the step. A step
+        # killed from outside used to leave its cost only in `events.jsonl`: the money was
+        # spent and `state.json` said nothing, so every reader that renders the ledger —
+        # `status`, the UI, the cost total — under-reported a run by whatever its longest
+        # step had cost. The illustrator step lost $4.91 that way.
+        ledger.set_step(
+            plan.step_id,
+            node=plan.node_id,
+            status=StepStatus.running,
+            started_at=started_at,
+            usage=paid,
+        )
 
     def finish(
         outcome: StepOutcome, *, tries: int, error: str | None = None
     ) -> StepState:
         status = StepStatus.done if outcome is StepOutcome.ok else StepStatus.failed
+        swept = sweep_mojibake_dirs(workdir)
+        if swept:
+            emit(
+                {
+                    "type": "log",
+                    "step_id": plan.step_id,
+                    "payload": {
+                        "swept_unreadable_dirs": swept,
+                        "note": "empty directories with undecodable names, left by the shell layer",
+                    },
+                }
+            )
         ledger.set_step(
             plan.step_id,
             node=plan.node_id,

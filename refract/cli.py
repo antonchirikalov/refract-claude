@@ -977,6 +977,9 @@ def deliver_impl(run_dir: Path | str, *, app: AppConfig) -> int:
     for line in report.render():
         typer.echo(f"  {line}")
     typer.echo(f"delivered to {report.output_dir}")
+    if report.result_dir is not None:
+        # Named second and last, because it is the path a person will actually open.
+        typer.echo(f"result: {report.result_dir}")
     return EXIT_OK if report.ok else EXIT_RUN_FAILED
 
 

@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from refract.deliver import deliver
+from refract.deliver import DeliveryReport, deliver
 from refract.models.pipeline import Pipeline
 from refract.registry import ArtifactRegistry
 
@@ -55,7 +55,9 @@ def _agents() -> dict:
 
 
 def _run_with_output(tmp_path: Path, *, body: str = "# Doc\n\nreal text\n") -> Path:
-    run_dir = tmp_path / "run"
+    # the real layout: <project>/runs/<id>/ — publish_result finds the project by
+    # the `runs` directory name, so a fixture that skips it tests a different path
+    run_dir = tmp_path / "runs" / "run_1"
     out = run_dir / "steps" / "write" / "main" / "output"
     out.mkdir(parents=True)
     (out / "doc.md").write_text(body, encoding="utf-8")
@@ -373,3 +375,74 @@ def test_nothing_open_means_no_report_in_the_delivery(tmp_path: Path) -> None:
     )
     assert "unresolved" not in report.delivered
     assert not (run_dir / "output" / "_unresolved.md").exists()
+
+
+# --- <project>/result/: where a person looks (SPEC §22) ----------------------
+#
+# `runs/<id>/output/` is the record: one per run, immutable, named after a timestamp, four
+# directories deep. Nobody browses that to read a document — the owner asked twice where the
+# result was.
+
+
+class TestResultDirectory:
+    def _deliver(self, tmp_path: Path, **kw: object) -> tuple[Path, DeliveryReport]:
+        run_dir = _run_with_output(tmp_path)
+        report = deliver(
+            run_dir,
+            pipeline=_pipeline({"requirements": "write.doc"}),
+            registry=write_registry(tmp_path),
+            agents=_agents(),
+            **kw,  # type: ignore[arg-type]
+        )
+        return run_dir, report
+
+    def test_the_delivery_is_mirrored_into_the_project_root(self, tmp_path: Path) -> None:
+        run_dir, report = self._deliver(tmp_path)
+        result = run_dir.parent.parent / "result"
+        assert report.result_dir == result
+        assert (result / "requirements.md").read_text("utf-8") == (
+            run_dir / "output" / "requirements.md"
+        ).read_text("utf-8")
+
+    def test_it_records_which_run_it_came_from(self, tmp_path: Path) -> None:
+        """Without this the directory is an orphan: current, but of what?"""
+        run_dir, _report = self._deliver(tmp_path)
+        stamp = (run_dir.parent.parent / "result" / "FROM_RUN.txt").read_text("utf-8")
+        assert stamp.strip() == run_dir.name
+
+    def test_a_real_copy_not_a_link(self, tmp_path: Path) -> None:
+        """This directory gets zipped and sent; a link travels as a broken pointer."""
+        run_dir, _report = self._deliver(tmp_path)
+        f = run_dir.parent.parent / "result" / "requirements.md"
+        assert not f.is_symlink()
+
+    def test_a_later_run_replaces_it_wholesale(self, tmp_path: Path) -> None:
+        """A file the new run stopped delivering must not linger looking current."""
+        run_dir, _report = self._deliver(tmp_path)
+        result = run_dir.parent.parent / "result"
+        (result / "leftover.md").write_text("from an older run", encoding="utf-8")
+        deliver(
+            run_dir,
+            pipeline=_pipeline({"requirements": "write.doc"}),
+            registry=write_registry(tmp_path),
+            agents=_agents(),
+        )
+        assert not (result / "leftover.md").exists()
+        assert (result / "requirements.md").exists()
+
+    def test_publishing_can_be_switched_off(self, tmp_path: Path) -> None:
+        run_dir, report = self._deliver(tmp_path, publish=False)
+        assert report.result_dir is None
+        assert not (run_dir.parent.parent / "result").exists()
+
+    def test_nothing_delivered_publishes_nothing(self, tmp_path: Path) -> None:
+        """An empty result directory is worse than none: it reads as a finished run."""
+        run_dir = _run_with_output(tmp_path)
+        report = deliver(
+            run_dir,
+            pipeline=_pipeline({}),
+            registry=write_registry(tmp_path),
+            agents=_agents(),
+        )
+        assert report.result_dir is None
+        assert not (run_dir.parent.parent / "result").exists()

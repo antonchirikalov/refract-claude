@@ -36,6 +36,11 @@ from refract.models.pipeline import Node, Pipeline
 from refract.registry import ArtifactRegistry
 
 OUTPUT_DIRNAME = "output"
+# Where a person looks for the result. `runs/<id>/output/` is the record — one per run,
+# immutable, addressable — and it is four directories deep under a name that changes every
+# time. Nobody browses that to read a document. `result/` sits in the project root and holds
+# the latest run's delivery, so "where is it" has one answer that does not move.
+RESULT_DIRNAME = "result"
 
 
 @dataclass
@@ -45,6 +50,9 @@ class DeliveryReport:
     output_dir: Path
     delivered: dict[str, str] = field(default_factory=dict)
     missing: dict[str, str] = field(default_factory=dict)
+    # Where the same content was mirrored for a person to open (``<project>/result/``),
+    # or None when nothing was delivered or publishing was switched off.
+    result_dir: Path | None = None
 
     @property
     def ok(self) -> bool:
@@ -176,17 +184,64 @@ def _source_of(
     )
 
 
+def _project_root(run_dir: Path) -> Path | None:
+    """The project a run belongs to: the parent of the ``runs/`` directory holding it.
+
+    Found by name rather than by counting levels up. ``run_dir.parent.parent`` gives the
+    right answer for ``<project>/runs/<id>/`` and a silently wrong one for anything else —
+    and "anything else" includes every test fixture and every hand-made directory someone
+    points the CLI at. Writing a `result/` outside the project is not a bug you notice.
+    """
+    parent = run_dir.parent
+    if parent.name != "runs":
+        return None
+    return parent.parent
+
+
+def publish_result(run_dir: Path, report: DeliveryReport) -> Path | None:
+    """Mirror this run's delivery into ``<project>/result/`` (SPEC §22).
+
+    The run's own ``output/`` stays where it is: it belongs to that run and must not change
+    when the next one finishes. ``result/`` is the other half of the same idea — the current
+    answer to "where is it", in the project root where a person actually looks, rather than
+    four levels down under a directory named after a timestamp.
+
+    A copy, not a link: this directory is what gets zipped and sent, and a link would travel
+    as a broken pointer. Rebuilt from scratch, so a run that stops delivering something does
+    not leave the previous run's version of it sitting there looking current.
+    """
+    out_dir = run_dir / OUTPUT_DIRNAME
+    if not out_dir.is_dir() or not any(out_dir.iterdir()):
+        return None
+    project_dir = _project_root(run_dir)
+    if project_dir is None:
+        return None
+    result_dir = project_dir / RESULT_DIRNAME
+    if result_dir.exists():
+        shutil.rmtree(long_path(result_dir))
+    shutil.copytree(long_path(out_dir), long_path(result_dir))
+    (result_dir / "FROM_RUN.txt").write_text(
+        f"{run_dir.name}\n", encoding="utf-8"
+    )
+    report.result_dir = result_dir
+    return result_dir
+
+
 def deliver(
     run_dir: Path | str,
     *,
     pipeline: Pipeline,
     registry: ArtifactRegistry,
     agents: dict[str, AgentSpec] | None = None,
+    publish: bool = True,
 ) -> DeliveryReport:
     """Copy every declared output into ``runs/<id>/output/`` (SPEC §22).
 
     Rebuilt from scratch on every call so a resumed or rerun delivery cannot leave a
     stale artifact from an earlier attempt sitting beside a fresh one.
+
+    With ``publish``, the same content is mirrored into ``<project>/result/`` — see
+    ``publish_result`` for why both exist.
     """
     run_dir = Path(run_dir)
     out_dir = run_dir / OUTPUT_DIRNAME
@@ -223,4 +278,6 @@ def deliver(
         dst = out_dir / (name if is_dir else name + "".join(Path(src.name).suffixes))
         link_or_copy(src, dst)
         report.delivered[name] = dst.relative_to(run_dir).as_posix()
+    if publish:
+        publish_result(run_dir, report)
     return report

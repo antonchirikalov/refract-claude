@@ -1085,3 +1085,134 @@ class TestRetryContextSurvivesResume:
         assert "input/_rejected" in prompt, "the resumed step started from scratch"
         assert "min_length 500" in prompt, "the feedback was not rebuilt from the archive"
         assert (plan2.workdir / "input" / "_rejected" / "doc.md").read_text("utf-8") == short
+
+
+class TestSweepUnreadableDirs:
+    """A step that uses `bash` grows empty directories with undecodable names — three to
+    eleven of them, always empty, beside `prompt.md` and `output/`. Harmless, and they make
+    the step unreadable, which is a bad trade to leave in place."""
+
+    def _mk(self, root: Path, name: str, *, empty: bool = True) -> Path:
+        d = root / name
+        d.mkdir()
+        if not empty:
+            (d / "payload.txt").write_text("data", encoding="utf-8")
+        return d
+
+    def test_empty_broken_named_directories_go(self, tmp_path: Path) -> None:
+        from refract.steps import sweep_mojibake_dirs
+
+        # a surrogate: a byte that never decoded
+        self._mk(tmp_path, "\udc5b翺")
+        # unassigned code points, the other shape these names take
+        self._mk(tmp_path, "")
+        assert sweep_mojibake_dirs(tmp_path) == 2
+        assert list(tmp_path.iterdir()) == []
+
+    def test_a_broken_name_with_content_stays(self, tmp_path: Path) -> None:
+        """Anything with content is somebody's data, whatever its name looks like."""
+        from refract.steps import sweep_mojibake_dirs
+
+        d = self._mk(tmp_path, "\udc5b翺", empty=False)
+        assert sweep_mojibake_dirs(tmp_path) == 0
+        assert (d / "payload.txt").exists()
+
+    def test_ordinary_names_are_left_alone(self, tmp_path: Path) -> None:
+        """Russian and Chinese directory names are perfectly legal."""
+        from refract.steps import sweep_mojibake_dirs
+
+        for name in ("output", "figures-work", "результаты", "输出", "café"):
+            self._mk(tmp_path, name)
+        assert sweep_mojibake_dirs(tmp_path) == 0
+        assert len(list(tmp_path.iterdir())) == 5
+
+    def test_files_are_never_touched(self, tmp_path: Path) -> None:
+        from refract.steps import sweep_mojibake_dirs
+
+        f = tmp_path / "\udc5b翺.bin"
+        f.write_bytes(b"x")
+        assert sweep_mojibake_dirs(tmp_path) == 0
+        assert f.exists()
+
+    def test_a_missing_workdir_is_not_an_error(self, tmp_path: Path) -> None:
+        from refract.steps import sweep_mojibake_dirs
+
+        assert sweep_mojibake_dirs(tmp_path / "nope") == 0
+
+
+class TestUsageReachesTheLedgerPerAttempt:
+    """Cost lands in the ledger after each PAID attempt, not only when the whole step ends.
+
+    A step retries — infra backoff, gate feedback — and each attempt is billed. Recording
+    only at the end meant a step killed after two paid attempts left `state.json` saying
+    nothing about them, while `events.jsonl` had both. Every reader that renders the ledger
+    then under-reported the run by whatever its longest step had cost.
+    """
+
+    def test_the_ledger_knows_after_the_first_paid_attempt(
+        self, tmp_path: Path, registry: ArtifactRegistry
+    ) -> None:
+        plan = _plan(
+            tmp_path,
+            registry,
+            _agent(),
+            gate_rules=[MinLengthRule(rule="min_length", value=500)],
+        )
+        ledger = _ledger(tmp_path, ["write"])
+        seen: list[float | None] = []
+
+        class _BilledTwice:
+            def __init__(self) -> None:
+                self.n = 0
+
+            async def run_step(self, spec, on_event):  # noqa: ANN001
+                self.n += 1
+                # what the ledger holds at the START of attempt 2 is what attempt 1 recorded
+                st = ledger.state.steps.get(plan.step_id)
+                seen.append(st.usage.cost_usd if st and st.usage else None)
+                out = spec.workdir / "output"
+                out.mkdir(parents=True, exist_ok=True)
+                body = "# Doc\n\n" + ("long " * 200 if self.n > 1 else "short")
+                (out / "doc.md").write_text(body, encoding="utf-8")
+                return StepResult(completed=True, usage={"cost": 0.5})
+
+            async def close(self) -> None:
+                return None
+
+        step = asyncio.run(execute_agent_step(plan, _BilledTwice(), ledger, sleeper=_no_sleep))
+        assert step.outcome is StepOutcome.ok
+        assert seen[0] is None, "nothing was paid before the first attempt"
+        assert seen[1] == 0.5, "attempt 1's cost was not in the ledger when attempt 2 began"
+
+    def test_the_final_state_still_carries_the_total(
+        self, tmp_path: Path, registry: ArtifactRegistry
+    ) -> None:
+        """Writing it early must not lose it at the end."""
+        plan = _plan(
+            tmp_path,
+            registry,
+            _agent(),
+            gate_rules=[MinLengthRule(rule="min_length", value=500)],
+        )
+
+        class _BilledTwice:
+            def __init__(self) -> None:
+                self.n = 0
+
+            async def run_step(self, spec, on_event):  # noqa: ANN001
+                self.n += 1
+                out = spec.workdir / "output"
+                out.mkdir(parents=True, exist_ok=True)
+                body = "# Doc\n\n" + ("long " * 200 if self.n > 1 else "short")
+                (out / "doc.md").write_text(body, encoding="utf-8")
+                return StepResult(completed=True, usage={"cost": 0.25})
+
+            async def close(self) -> None:
+                return None
+
+        step = asyncio.run(
+            execute_agent_step(plan, _BilledTwice(), _ledger(tmp_path, ["write"]), sleeper=_no_sleep)
+        )
+        assert step.usage is not None
+        assert step.usage.cost_usd == 0.5
+        assert step.usage.calls == 2

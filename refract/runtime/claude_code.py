@@ -23,6 +23,7 @@ tested in ``tests/test_claude_code.py``.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -623,11 +624,8 @@ class ClaudeCodeRuntime:
             )
             self._procs.add(proc)
             heartbeat = asyncio.create_task(self._heartbeat(spec, on_event))
-            stdout, stderr = await proc.communicate(spec.prompt.encode("utf-8"))
-            for line in stdout.decode("utf-8", errors="replace").splitlines():
-                event = parse_stream_line(line, spec.step_id, trace)
-                if event is not None:
-                    on_event(event)
+            stderr_bytes = await self._pump(proc, spec, trace, on_event)
+            stderr = stderr_bytes
             unused = unused_mcp_servers(spec.needs, trace)
             if unused:
                 # configured, reachable, and never called: the agent chose otherwise.
@@ -788,12 +786,73 @@ class ClaudeCodeRuntime:
         path.write_text(spec.system_prompt, encoding="utf-8")
         return path
 
+    async def _pump(
+        self,
+        proc: "asyncio.subprocess.Process",
+        spec: StepSpec,
+        trace: TurnTrace,
+        on_event: EventCallback,
+    ) -> bytes:
+        """Feed the prompt in, then read stdout LINE BY LINE, writing the trace as it goes.
+
+        The previous single ``communicate()`` held every event in memory until the process
+        exited, which had two costs. A step killed from outside — a closed terminal, a
+        supervisor timeout, a machine going down — left NOTHING behind, and the illustrator
+        step that had been drawing for two hours lost its whole record that way. And while a
+        long step ran there was no way to see what the agent was doing: `agent.events.jsonl`
+        appeared only once the step was over.
+
+        Now each event lands on disk as it arrives, so the file is a live log and a killed
+        step keeps everything up to the moment it died.
+        """
+        assert proc.stdin is not None and proc.stdout is not None and proc.stderr is not None
+        trace_path = spec.workdir / TRACE_FILENAME
+
+        async def drain_stderr() -> bytes:
+            assert proc.stderr is not None
+            return await proc.stderr.read()
+
+        stderr_task = asyncio.create_task(drain_stderr())
+        try:
+            proc.stdin.write(spec.prompt.encode("utf-8"))
+            await proc.stdin.drain()
+        except (BrokenPipeError, ConnectionResetError):
+            # the CLI died before reading the prompt; its stderr says why
+            pass
+        finally:
+            with contextlib.suppress(BrokenPipeError, ConnectionResetError, OSError):
+                proc.stdin.close()
+
+        # Line-buffered append, flushed per event: a reader tailing this file sees the step
+        # progress, and a kill -9 costs at most the line being written.
+        with trace_path.open("w", encoding="utf-8", newline="\n") as fh:
+            written = 0
+            async for raw_line in proc.stdout:
+                line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+                if not line:
+                    continue
+                before = len(trace.events)
+                event = parse_stream_line(line, spec.step_id, trace)
+                for item in trace.events[before:]:
+                    fh.write(json.dumps(item, ensure_ascii=False) + "\n")
+                    written += 1
+                if written:
+                    fh.flush()
+                if event is not None:
+                    on_event(event)
+        await proc.wait()
+        return await stderr_task
+
     def _write_trace(self, spec: StepSpec, trace: TurnTrace, stderr: str) -> None:
         """Persist ``raw.txt`` + ``agent.events.jsonl`` for this attempt (I9)."""
         raw = trace.text or "[claude: no assistant text]"
         if stderr.strip():
             raw = f"{raw}\n\n--- stderr ---\n{stderr.strip()}"
         (spec.workdir / RAW_FILENAME).write_text(raw, encoding="utf-8")
+        # The stream already wrote what arrived over stdout; this rewrite adds the events
+        # the engine appended afterwards (unused/failed MCP servers, undeclared tools) and
+        # keeps the file correct for the paths that never streamed — a timeout or an infra
+        # error before the process produced a line.
         lines = [json.dumps(e, ensure_ascii=False) for e in trace.events]
         (spec.workdir / TRACE_FILENAME).write_text(
             "\n".join(lines) + ("\n" if lines else ""), encoding="utf-8"

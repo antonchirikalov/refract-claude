@@ -129,11 +129,12 @@ have drawn — you brief the tool well and let it work.
    the caption that was already under it:
 
    ```
-   ![Figure 1. System-context overview](illustrations/system-context-overview.png)
+   ![Figure 1. System-context overview](illustration/system-context-overview.png)
    *Figure 1. System-context overview.*
    ```
 
-   The path is `illustrations/<slug>.png` — a relative path, because the document travels
+   The path is `illustration/<slug>.png` — the same name as the port, so the link
+   resolves both in the step tree and in the assembled delivery — a relative path, because the document travels
    with its pictures beside it. Delete the HTML comment: it was a work order, and once the
    work is done a reader should see the figure, not the instructions for drawing it.
 
